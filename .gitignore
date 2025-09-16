@@ -32,4 +32,4 @@ go.work
 selfIdentity.plist
 
 # Build output
-tunneld-*
+tunneld*

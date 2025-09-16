@@ -1,0 +1,41 @@
+on:
+  push:
+    branches:
+      - main
+
+name: Release-TunnelD
+jobs:
+  build_all:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Go
+        uses: actions/setup-go@v3
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: |
+          make build-all
+          mv ./tunneld-macos-arm64 ./tunneld
+          zip -j tunneld-mac-arm64.zip ./tunneld
+          mv ./tunneld-linux-arm64 ./tunneld
+          zip -j tunneld-linux-arm64.zip ./tunneld
+          mv ./tunneld-linux-x64 ./tunneld
+          zip -j tunneld-linux-x64.zip ./tunneld
+
+      - name: upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: *.zip
+          retention-days: 1
+          overwrite: true
+
+      - uses: AButler/upload-release-assets@v2.0
+        with:
+          files: "*.zip"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          release-tag: ${{ env.release_tag }}
