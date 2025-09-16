@@ -2,7 +2,7 @@
 
 Creates RSD tunnels to iOS 17+ devices. 
 
-Based off Go-iOS's (https://github.com/danielpaulus/go-ios) tunnel service but with a few differences:
+Based off Go-iOS's tunnel service but with a few differences:
 
 - Uses the same tunnel type for all iOS 17+ devices (NCM TCP)
 - Doesn't use USBMUX
@@ -45,3 +45,7 @@ WebSocket On-demand API:
 ```
 GET /ws/create-tunnel?udid=<udid>
 ```
+
+## Thanks
+
+This project makes use of code from Go-iOS (https://github.com/danielpaulus/go-ios), licensed under the MIT License.
