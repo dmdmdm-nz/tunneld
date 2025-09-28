@@ -53,6 +53,8 @@ func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, add
 	if err != nil {
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to connect to TUN device: %w", err)
 	}
+	defer conn.Close()
+
 	h, err := http.NewHttpConnection(conn)
 	if err != nil {
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create HTTP2 connection: %w", err)
