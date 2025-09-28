@@ -314,6 +314,9 @@ func (s *Service) createTunnel(ctx context.Context, info rsd.RsdService) (*tunne
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				case <-time.After(1 * time.Second):
+					log.WithFields(log.Fields{
+						"udid": info.Udid,
+					}).Info("Re-attempting tunnel creation after new pairing")
 					continue
 				}
 			}
