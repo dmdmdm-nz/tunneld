@@ -304,14 +304,27 @@ func (s *Service) createTunnel(ctx context.Context, info rsd.RsdService) (*tunne
 		"deviceVersion": info.DeviceIosVersion,
 	}).Info("Creating tunnel to device")
 
-	t, err := tunnel.ManualPairAndConnectToTunnel(ctx, s.pm, info.Address, info.Udid)
-	if err != nil {
-		log.WithFields(log.Fields{
-			"address": info.Address,
-			"udid":    info.Udid,
-		}).WithError(err).Error("Failed to connect to tunnel")
+	var t tunnel.Tunnel
+	var err error
+	for {
+		t, err = tunnel.ManualPairAndConnectToTunnel(ctx, s.pm, info.Address, info.Udid)
+		if err != nil {
+			if strings.Contains(err.Error(), "new pairing created, re-attempting connection") {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(1 * time.Second):
+					continue
+				}
+			}
 
-		return nil, err
+			log.WithFields(log.Fields{
+				"address": info.Address,
+				"udid":    info.Udid,
+			}).WithError(err).Error("Failed to connect to tunnel")
+			return nil, err
+		}
+		break
 	}
 
 	log.WithFields(log.Fields{
