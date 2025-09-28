@@ -3,16 +3,23 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/coder/websocket"
+	"github.com/dmdmdm-nz/tunneld/internal/tunnel"
 )
 
 type WebSocketTunnelInfo struct {
 	Status  string `json:"status"`
 	Address string `json:"address"`
 	RsdPort int    `json:"rsdPort"`
+}
+
+type CreateTunnelResponse struct {
+	tunnel *tunnel.Tunnel
+	error  error
 }
 
 func accept(w http.ResponseWriter, r *http.Request) (*websocket.Conn, context.Context, error) {
@@ -33,6 +40,10 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 	}
 	defer c.Close(websocket.StatusNormalClosure, "closing")
 
+	// Create a new context that we can cancel.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	rsd, found := s.rsdMap[udid]
 	if !found {
 		response := WebSocketTunnelInfo{
@@ -43,14 +54,36 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 		return
 	}
 
-	tunnel, err := s.createTunnel(ctx, rsd)
-	if err != nil {
-		response := WebSocketTunnelInfo{
-			Status: "Failed to create tunnel",
+	reqCh := make(chan CreateTunnelResponse, 1)
+	go func() {
+		t, err := s.createTunnel(ctx, rsd)
+		reqCh <- CreateTunnelResponse{tunnel: t, error: err}
+	}()
+
+	go func() {
+		_, _, err := c.Read(ctx)
+		if err != nil {
+			cancel()
+			log.Info("WebSocket connection closed by client")
 		}
-		b, _ := json.Marshal(response)
-		_ = c.Write(ctx, websocket.MessageText, b)
+	}()
+
+	var tunnel *tunnel.Tunnel
+	select {
+	case <-ctx.Done():
+		// WebSocket connection terminated before the tunnel was created
+		s.removeTunnel(rsd)
 		return
+	case result := <-reqCh:
+		if result.error != nil {
+			response := WebSocketTunnelInfo{
+				Status: "Failed to create tunnel",
+			}
+			b, _ := json.Marshal(response)
+			_ = c.Write(ctx, websocket.MessageText, b)
+			return
+		}
+		tunnel = result.tunnel
 	}
 
 	response := WebSocketTunnelInfo{
