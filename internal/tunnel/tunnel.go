@@ -22,13 +22,13 @@ const TUNNEL_MTU = 64_000
 
 // Tunnel describes the parameters of an established tunnel to the device
 type Tunnel struct {
-	Address          string `json:"address"`          // Address is the IPv6 address of the device over the tunnel
-	RsdPort          int    `json:"rsdPort"`          // RsdPort is the port on which remote service discover is reachable
-	Udid             string `json:"udid"`             // Udid is the id of the device for this tunnel
-	UserspaceTUN     bool   `json:"userspaceTun"`     // Always false
-	UserspaceTUNPort int    `json:"userspaceTunPort"` // Always 0
-	TunnelContext    context.Context
-	closer           func() error
+	Address          string          `json:"address"`          // Address is the IPv6 address of the device over the tunnel
+	RsdPort          int             `json:"rsdPort"`          // RsdPort is the port on which remote service discover is reachable
+	Udid             string          `json:"udid"`             // Udid is the id of the device for this tunnel
+	UserspaceTUN     bool            `json:"userspaceTun"`     // Always false
+	UserspaceTUNPort int             `json:"userspaceTunPort"` // Always 0
+	TunnelContext    context.Context `json:"-"`
+	closer           func() error    `json:"-"`
 }
 
 // Close closes the connection to the device and removes the virtual network interface from the host
@@ -38,36 +38,45 @@ func (t Tunnel) Close() error {
 
 // ManualPairAndConnectToTunnel tries to verify an existing pairing, and if this fails it triggers a new manual pairing process.
 // After a successful pairing a tunnel for this device gets started and the tunnel information is returned
-func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, addr string, udid string) (Tunnel, error) {
+func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, addr string, udid string, updateStatusCallback func(string, TunnelStatus)) (Tunnel, error) {
+	updateStatusCallback(udid, Connecting)
+
 	resumeRemoted, err := SuspendRemoted()
 	if err != nil {
+		updateStatusCallback(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to suspend remoted: %w", err)
 	}
 	defer resumeRemoted()
 
 	port, err := getUntrustedTunnelServicePort(addr)
 	if err != nil {
+		updateStatusCallback(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: could not find port for '%s'", untrustedTunnelServiceName)
 	}
 	conn, err := ConnectTUN(addr, port)
 	if err != nil {
+		updateStatusCallback(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to connect to TUN device: %w", err)
 	}
 	defer conn.Close()
 
 	h, err := http.NewHttpConnection(conn)
 	if err != nil {
+		updateStatusCallback(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create HTTP2 connection: %w", err)
 	}
 
 	xpcConn, err := CreateXpcConnection(h)
 	if err != nil {
+		updateStatusCallback(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create RemoteXPC connection: %w", err)
 	}
 	ts := newTunnelServiceWithXpc(xpcConn, h, p)
 
+	updateStatusCallback(udid, Pairing)
 	pairingResult, err := ts.ManualPair(ctx)
 	if err != nil {
+		updateStatusCallback(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to pair device: %w", err)
 	}
 
@@ -78,12 +87,16 @@ func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, add
 
 	tunnelInfo, err := ts.createTunnelListener(pairingResult.SharedSecret)
 	if err != nil {
+		updateStatusCallback(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create tunnel listener: %w", err)
 	}
 	t, err := connectToTunnel(ctx, tunnelInfo, addr, udid, pairingResult.SharedSecret)
 	if err != nil {
+		updateStatusCallback(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to connect to tunnel: %w", err)
 	}
+
+	updateStatusCallback(udid, Connected)
 	return t, nil
 }
 

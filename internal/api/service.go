@@ -23,14 +23,18 @@ type Service struct {
 	port              int
 	autoCreateTunnels bool
 
-	rsdCh    <-chan rsd.RsdServiceEvent
-	rsdUnsub func()
-	rsdMap   map[string]rsd.RsdService
+	rsdCh       <-chan rsd.RsdServiceEvent
+	rsdUnsub    func()
+	rsdMapMutex sync.Mutex
+	rsdMap      map[string]rsd.RsdService
 
-	mu      sync.Mutex
-	tunnels map[string]*tunnel.Tunnel
-	pm      *tunnel.PairRecordManager
+	tunnelsMutex sync.Mutex
+	tunnels      map[string]*tunnel.Tunnel
 
+	tunnelsStatusMutex sync.Mutex
+	tunnelsStatus      map[string]tunnel.TunnelStatus
+
+	pm     *tunnel.PairRecordManager
 	closed bool
 }
 
@@ -46,6 +50,7 @@ func NewService(host string, port int, autoCreateTunnels bool) *Service {
 		autoCreateTunnels: autoCreateTunnels,
 		pm:                &pm,
 		tunnels:           make(map[string]*tunnel.Tunnel),
+		tunnelsStatus:     make(map[string]tunnel.TunnelStatus),
 		rsdMap:            make(map[string]rsd.RsdService),
 	}
 }
@@ -82,9 +87,9 @@ func (s *Service) Start(ctx context.Context) error {
 			}
 			switch ev.Type {
 			case rsd.RsdServiceAdded:
-				s.mu.Lock()
+				s.rsdMapMutex.Lock()
 				s.rsdMap[ev.Info.Udid] = ev.Info
-				s.mu.Unlock()
+				s.rsdMapMutex.Unlock()
 
 				if s.autoCreateTunnels {
 					go func() {
@@ -92,9 +97,9 @@ func (s *Service) Start(ctx context.Context) error {
 					}()
 				}
 			case rsd.RsdServiceRemoved:
-				s.mu.Lock()
+				s.rsdMapMutex.Lock()
 				delete(s.rsdMap, ev.Info.Udid)
-				s.mu.Unlock()
+				s.rsdMapMutex.Unlock()
 
 				s.removeTunnel(ev.Info)
 			}
@@ -107,18 +112,19 @@ func (s *Service) Close() error {
 		s.rsdUnsub()
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.tunnelsMutex.Lock()
+	defer s.tunnelsMutex.Unlock()
 	if s.closed {
 		return nil
 	}
 	s.closed = true
 
 	// Close all the tunnels
-	for udid, tunnel := range s.tunnels {
+	for udid, t := range s.tunnels {
 		log.WithField("udid", udid).Info("Closing all tunnels")
-		tunnel.Close()
+		t.Close()
 		delete(s.tunnels, udid)
+		s.updateTunnelStatus(udid, tunnel.Disconnected)
 	}
 
 	return nil
@@ -186,8 +192,8 @@ func (s *Service) startApiService(ctx context.Context) error {
 		writer.Header().Add("Content-Type", "application/json")
 		enc := json.NewEncoder(writer)
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
+		s.tunnelsMutex.Lock()
+		defer s.tunnelsMutex.Unlock()
 
 		tunnels := make([]tunnel.Tunnel, 0, len(s.tunnels))
 		for _, t := range s.tunnels {
@@ -217,6 +223,14 @@ func (s *Service) startApiService(ctx context.Context) error {
 		}
 
 		CreateWebSocketTunnel(s, string(udid), w, r)
+	})
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.getTunnelStatus(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
 	addr := fmt.Sprintf("%s:%d", s.address, s.port)
@@ -307,7 +321,7 @@ func (s *Service) createTunnel(ctx context.Context, info rsd.RsdService) (*tunne
 	var t tunnel.Tunnel
 	var err error
 	for {
-		t, err = tunnel.ManualPairAndConnectToTunnel(ctx, s.pm, info.Address, info.Udid)
+		t, err = tunnel.ManualPairAndConnectToTunnel(ctx, s.pm, info.Address, info.Udid, s.updateTunnelStatus)
 		if err != nil {
 			if strings.Contains(err.Error(), "new pairing created, re-attempting connection") {
 				select {
@@ -336,8 +350,8 @@ func (s *Service) createTunnel(ctx context.Context, info rsd.RsdService) (*tunne
 		"udid":    t.Udid,
 	}).Info("Successfully connected to tunnel")
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.tunnelsMutex.Lock()
+	defer s.tunnelsMutex.Unlock()
 	if _, ok := s.tunnels[info.Udid]; ok {
 		// Tunnel already exists.
 		log.WithFields(log.Fields{
@@ -354,25 +368,80 @@ func (s *Service) createTunnel(ctx context.Context, info rsd.RsdService) (*tunne
 }
 
 func (s *Service) removeTunnel(info rsd.RsdService) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if tunnel, ok := s.tunnels[info.Udid]; ok {
+	s.tunnelsMutex.Lock()
+	defer s.tunnelsMutex.Unlock()
+	if t, ok := s.tunnels[info.Udid]; ok {
 		log.WithField("udid", info.Udid).Info("Removing tunnel")
 		delete(s.tunnels, info.Udid)
-		tunnel.Close()
+		s.updateTunnelStatus(info.Udid, tunnel.Disconnected)
+		t.Close()
 	}
 }
 
 func (s *Service) tunnelExists(udid string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.tunnelsMutex.Lock()
+	defer s.tunnelsMutex.Unlock()
 	_, exists := s.tunnels[udid]
 	return exists
 }
 
 func (s *Service) rsdExists(udid string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.rsdMapMutex.Lock()
+	defer s.rsdMapMutex.Unlock()
 	_, exists := s.rsdMap[udid]
 	return exists
+}
+
+func (s *Service) updateTunnelStatus(udid string, status tunnel.TunnelStatus) {
+	s.tunnelsStatusMutex.Lock()
+	defer s.tunnelsStatusMutex.Unlock()
+	s.tunnelsStatus[udid] = status
+}
+
+func (s *Service) getTunnelStatus(w http.ResponseWriter, r *http.Request) {
+
+	w.Header().Add("Content-Type", "application/json")
+	enc := json.NewEncoder(w)
+
+	s.tunnelsMutex.Lock()
+	defer s.tunnelsMutex.Unlock()
+
+	s.tunnelsStatusMutex.Lock()
+	defer s.tunnelsStatusMutex.Unlock()
+
+	status := struct {
+		AutoCreateTunnels bool               `json:"autoCreateTunnels"`
+		Devices           []DeviceTunnelInfo `json:"devices"`
+	}{
+		AutoCreateTunnels: s.autoCreateTunnels,
+		Devices:           make([]DeviceTunnelInfo, 0),
+	}
+
+	for udid := range s.rsdMap {
+		var tunnelStatus string
+		if status, ok := s.tunnelsStatus[udid]; ok {
+			tunnelStatus = status.String()
+		} else {
+			tunnelStatus = ""
+		}
+
+		var tunnelInfo *tunnel.Tunnel
+		if t, ok := s.tunnels[udid]; ok {
+			tunnelInfo = t
+		} else {
+			tunnelInfo = nil
+		}
+
+		status.Devices = append(status.Devices, DeviceTunnelInfo{
+			Udid:         udid,
+			TunnelStatus: tunnelStatus,
+			TunnelInfo:   tunnelInfo,
+		})
+	}
+
+	err := enc.Encode(status)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode status info: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
