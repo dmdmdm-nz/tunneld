@@ -417,12 +417,10 @@ func (s *Service) getTunnelStatus(w http.ResponseWriter, r *http.Request) {
 		Devices:           make([]DeviceTunnelInfo, 0),
 	}
 
-	for udid := range s.rsdMap {
-		var tunnelStatus string
+	for udid, rsd := range s.rsdMap {
+		var tunnelStatus tunnel.TunnelStatus = tunnel.Disconnected
 		if status, ok := s.tunnelsStatus[udid]; ok {
-			tunnelStatus = status.String()
-		} else {
-			tunnelStatus = ""
+			tunnelStatus = status
 		}
 
 		var tunnelInfo *tunnel.Tunnel
@@ -433,8 +431,9 @@ func (s *Service) getTunnelStatus(w http.ResponseWriter, r *http.Request) {
 		}
 
 		status.Devices = append(status.Devices, DeviceTunnelInfo{
-			Udid:         udid,
-			TunnelStatus: tunnelStatus,
+			Udid:         rsd.Udid,
+			Version:      rsd.DeviceIosVersion,
+			TunnelStatus: tunnelStatus.String(),
 			TunnelInfo:   tunnelInfo,
 		})
 	}
