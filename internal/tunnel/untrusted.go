@@ -28,7 +28,7 @@ const untrustedTunnelServiceName = "com.apple.internal.dt.coredevice.untrusted.t
 
 type PairingResult struct {
 	SharedSecret []byte
-	NewPairing   bool
+	NeedsPairing bool
 }
 
 func newTunnelServiceWithXpc(xpcConn *xpc.Connection, c io.Closer, pairRecords *PairRecordManager) *tunnelService {
@@ -54,11 +54,8 @@ func (t *tunnelService) Close() error {
 	return t.c.Close()
 }
 
-// ManualPair triggers a device pairing that requires the user to press the 'Trust' button on the device that appears
-// when this operation is triggered
-// If there is already an active pairing with the credentials stored in PairRecordManager this call does not trigger
-// anything on the device and returns with an error
-func (t *tunnelService) ManualPair(ctx context.Context) (PairingResult, error) {
+// VerifyPairing verifies that there is already an active pairing with the credentials stored in PairRecordManager
+func (t *tunnelService) VerifyPairing(ctx context.Context, udid string) (PairingResult, error) {
 	err := t.controlChannel.writeRequest(map[string]interface{}{
 		"handshake": map[string]interface{}{
 			"_0": map[string]interface{}{
@@ -81,11 +78,18 @@ func (t *tunnelService) ManualPair(ctx context.Context) (PairingResult, error) {
 
 	sharedSecret, err := t.verifyPair()
 	if err == nil {
-		return PairingResult{SharedSecret: sharedSecret, NewPairing: false}, nil
+		return PairingResult{SharedSecret: sharedSecret}, nil
 	}
-	log.WithError(err).Debug("Pair verify failed")
 
-	err = t.setupManualPairing()
+	return PairingResult{SharedSecret: sharedSecret, NeedsPairing: true}, nil
+}
+
+// ManualPair triggers a device pairing that requires the user to press the 'Trust' button on the device that appears
+// when this operation is triggered
+// If there is already an active pairing with the credentials stored in PairRecordManager this call does not trigger
+// anything on the device and returns with an error
+func (t *tunnelService) ManualPair(ctx context.Context, udid string, sharedSecret []byte) (PairingResult, error) {
+	err := t.setupManualPairing()
 	if err != nil {
 		return PairingResult{}, fmt.Errorf("ManualPair: failed to initiate manual pairing: %w", err)
 	}
@@ -110,7 +114,7 @@ func (t *tunnelService) ManualPair(ctx context.Context) (PairingResult, error) {
 		return PairingResult{}, fmt.Errorf("ManualPair: failed to create unlock key: %w", err)
 	}
 
-	return PairingResult{SharedSecret: sharedSecret, NewPairing: true}, nil
+	return PairingResult{SharedSecret: sharedSecret}, nil
 }
 
 func (t *tunnelService) createTunnelListener(sharedSecret []byte) (tunnelListener, error) {
@@ -217,7 +221,6 @@ func (t *tunnelService) readDeviceKey(ctx context.Context) (publicKey []byte, sa
 		done <- t.controlChannel.readEvent(&pairingData)
 	}()
 
-	log.Info("ManualPair: Displaying trust prompt on device")
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()

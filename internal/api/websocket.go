@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	log "github.com/sirupsen/logrus"
@@ -64,7 +65,7 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 		_, _, err := c.Read(ctx)
 		if err != nil {
 			cancel()
-			log.Info("WebSocket connection closed by client")
+			log.WithField("udid", udid).Info("WebSocket connection closed by client")
 		}
 	}()
 
@@ -76,11 +77,7 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 		return
 	case result := <-reqCh:
 		if result.error != nil {
-			response := WebSocketTunnelInfo{
-				Status: "Failed to create tunnel",
-			}
-			b, _ := json.Marshal(response)
-			_ = c.Write(ctx, websocket.MessageText, b)
+			http.Error(w, fmt.Sprintf("Failed to create tunnel: %v", result.error), http.StatusConflict)
 			return
 		}
 		tunnel = result.tunnel

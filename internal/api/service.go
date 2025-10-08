@@ -31,10 +31,14 @@ type Service struct {
 	tunnelsMutex sync.Mutex
 	tunnels      map[string]*tunnel.Tunnel
 
+	pairedStatusMutex sync.Mutex
+	pairedStatus      map[string]bool
+
 	tunnelsStatusMutex sync.Mutex
 	tunnelsStatus      map[string]tunnel.TunnelStatus
 
 	pm     *tunnel.PairRecordManager
+	tn     *tunnel.TunnelNotifications
 	closed bool
 }
 
@@ -44,13 +48,17 @@ func NewService(host string, port int, autoCreateTunnels bool) *Service {
 		log.WithError(err).Fatal("Failed to create PairRecordManager")
 	}
 
+	tn := tunnel.NewTunnelNotifications()
+
 	return &Service{
 		address:           host,
 		port:              port,
 		autoCreateTunnels: autoCreateTunnels,
 		pm:                &pm,
+		tn:                tn,
 		tunnels:           make(map[string]*tunnel.Tunnel),
 		tunnelsStatus:     make(map[string]tunnel.TunnelStatus),
+		pairedStatus:      make(map[string]bool),
 		rsdMap:            make(map[string]rsd.RsdService),
 	}
 }
@@ -77,6 +85,32 @@ func (s *Service) Start(ctx context.Context) error {
 		return nil
 	}
 
+	// Subscribe to tunnel notifications and listen for new events
+	tunnelEvents, unsub := s.tn.Subscribe()
+	defer unsub()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev, ok := <-tunnelEvents:
+				if !ok {
+					return
+				}
+
+				switch ev.Type {
+				case tunnel.DeviceNotPaired:
+					s.setPaired(ev.Udid, false)
+				case tunnel.DevicePaired:
+					s.setPaired(ev.Udid, true)
+				case tunnel.TunnelProgress:
+					s.setTunnelStatus(ev.Udid, ev.Status)
+				}
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,20 +121,16 @@ func (s *Service) Start(ctx context.Context) error {
 			}
 			switch ev.Type {
 			case rsd.RsdServiceAdded:
-				s.rsdMapMutex.Lock()
-				s.rsdMap[ev.Info.Udid] = ev.Info
-				s.rsdMapMutex.Unlock()
-
+				s.setRsd(ev.Info)
 				if s.autoCreateTunnels {
 					go func() {
 						s.runAutoTunnel(ctx, ev)
 					}()
+				} else {
+					s.setPaired(ev.Info.Udid, false)
 				}
 			case rsd.RsdServiceRemoved:
-				s.rsdMapMutex.Lock()
-				delete(s.rsdMap, ev.Info.Udid)
-				s.rsdMapMutex.Unlock()
-
+				s.removeRsd(ev.Info.Udid)
 				s.removeTunnel(ev.Info)
 			}
 		}
@@ -124,7 +154,7 @@ func (s *Service) Close() error {
 		log.WithField("udid", udid).Info("Closing all tunnels")
 		t.Close()
 		delete(s.tunnels, udid)
-		s.updateTunnelStatus(udid, tunnel.Disconnected)
+		s.setTunnelStatus(udid, tunnel.Disconnected)
 	}
 
 	return nil
@@ -217,8 +247,13 @@ func (s *Service) startApiService(ctx context.Context) error {
 			return
 		}
 
-		if !s.rsdExists(string(udid)) {
+		if !s.rsdExists(udid) {
 			http.Error(w, "No RSD service found for the given UDID", http.StatusNotFound)
+			return
+		}
+
+		if !s.isPaired(udid) {
+			http.Error(w, "Device has not been paired", http.StatusConflict)
 			return
 		}
 
@@ -227,7 +262,7 @@ func (s *Service) startApiService(ctx context.Context) error {
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			s.getTunnelStatus(w, r)
+			s.createTunnelStatusResponse(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -253,23 +288,8 @@ func (s *Service) runAutoTunnel(ctx context.Context, ev rsd.RsdServiceEvent) {
 				return
 			}
 
-			deviceVersion, err := semver.NewVersion(ev.Info.DeviceIosVersion)
-			if err != nil {
-				log.
-					WithFields(log.Fields{
-						"udid":          ev.Info.Udid,
-						"deviceVersion": ev.Info.DeviceIosVersion,
-					}).
-					WithError(err).
-					Warn("Skipping tunnel creation: failed to parse iOS version")
-				return
-			}
-
-			if deviceVersion.LessThan(semver.MustParse("17.0.0")) {
-				log.WithFields(log.Fields{
-					"udid":          ev.Info.Udid,
-					"deviceVersion": ev.Info.DeviceIosVersion,
-				}).Debug("Skipping tunnel creation: iOS version is below 17.0.0")
+			// Ensure the device is running iOS 17 or greater
+			if !s.isIos17OrGreater(ev.Info) {
 				return
 			}
 
@@ -310,6 +330,71 @@ func (s *Service) runAutoTunnel(ctx context.Context, ev rsd.RsdServiceEvent) {
 	}
 }
 
+func (s *Service) pairTunnel(udid string) {
+	// Get the RSD service info
+	rsd, ok := s.getRsd(udid)
+	if !ok {
+		log.WithField("udid", udid).Warn("No RSD service found for device, cannot pair tunnel")
+		return
+	}
+
+	// Ensure the device is running iOS 17 or greater
+	if !s.isIos17OrGreater(rsd) {
+		return
+	}
+
+	ctx := context.Background()
+
+	for {
+		err := tunnel.ManualPair(ctx, s.pm, rsd.Address, rsd.Udid, s.tn)
+		if err == nil {
+			break
+		}
+
+		if strings.Contains(err.Error(), "new pairing created, re-attempting connection") {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(1 * time.Second):
+			log.WithFields(log.Fields{
+				"udid": rsd.Udid,
+			}).Info("Re-attempting tunnel pairing")
+			continue
+		}
+	}
+
+	log.WithFields(log.Fields{
+		"udid": rsd.Udid,
+	}).Info("Device is paired and ready for tunnel creation")
+}
+
+func (s *Service) isIos17OrGreater(rsd rsd.RsdService) bool {
+	deviceVersion, err := semver.NewVersion(rsd.DeviceIosVersion)
+	if err != nil {
+		log.
+			WithFields(log.Fields{
+				"udid":          rsd.Udid,
+				"deviceVersion": rsd.DeviceIosVersion,
+			}).
+			WithError(err).
+			Warn("Skipping tunnel creation: failed to parse iOS version")
+		return false
+	}
+
+	if deviceVersion.LessThan(semver.MustParse("17.0.0")) {
+		log.WithFields(log.Fields{
+			"udid":          rsd.Udid,
+			"deviceVersion": rsd.DeviceIosVersion,
+		}).Debug("Skipping tunnel creation: iOS version is below 17.0.0")
+		return false
+	}
+
+	return true
+}
+
 func (s *Service) createTunnel(ctx context.Context, info rsd.RsdService) (*tunnel.Tunnel, error) {
 	log.WithFields(log.Fields{
 		"udid":          info.Udid,
@@ -321,7 +406,7 @@ func (s *Service) createTunnel(ctx context.Context, info rsd.RsdService) (*tunne
 	var t tunnel.Tunnel
 	var err error
 	for {
-		t, err = tunnel.ManualPairAndConnectToTunnel(ctx, s.pm, info.Address, info.Udid, s.updateTunnelStatus)
+		t, err = tunnel.ManualPairAndConnectToTunnel(ctx, s.pm, info.Address, info.Udid, s.autoCreateTunnels, s.tn)
 		if err != nil {
 			if strings.Contains(err.Error(), "new pairing created, re-attempting connection") {
 				select {
@@ -373,7 +458,7 @@ func (s *Service) removeTunnel(info rsd.RsdService) {
 	if t, ok := s.tunnels[info.Udid]; ok {
 		log.WithField("udid", info.Udid).Info("Removing tunnel")
 		delete(s.tunnels, info.Udid)
-		s.updateTunnelStatus(info.Udid, tunnel.Disconnected)
+		s.setTunnelStatus(info.Udid, tunnel.Disconnected)
 		t.Close()
 	}
 }
@@ -385,6 +470,62 @@ func (s *Service) tunnelExists(udid string) bool {
 	return exists
 }
 
+func (s *Service) isPaired(udid string) bool {
+	s.pairedStatusMutex.Lock()
+	defer s.pairedStatusMutex.Unlock()
+	paired, ok := s.pairedStatus[udid]
+	return paired && ok
+}
+
+func (s *Service) setPaired(udid string, paired bool) {
+	s.pairedStatusMutex.Lock()
+	defer s.pairedStatusMutex.Unlock()
+
+	needsPairing := false
+	if wasPaired, ok := s.pairedStatus[udid]; !ok || (wasPaired && !paired) {
+		needsPairing = true
+	}
+
+	s.pairedStatus[udid] = paired
+
+	if needsPairing {
+		go func() {
+			s.pairTunnel(udid)
+		}()
+	}
+}
+
+func (s *Service) getTunnelStatus(udid string) tunnel.TunnelStatus {
+	s.tunnelsStatusMutex.Lock()
+	defer s.tunnelsStatusMutex.Unlock()
+	status, ok := s.tunnelsStatus[udid]
+	if !ok {
+		return tunnel.Disconnected
+	}
+
+	return status
+}
+
+func (s *Service) setTunnelStatus(udid string, status tunnel.TunnelStatus) {
+	s.tunnelsStatusMutex.Lock()
+	defer s.tunnelsStatusMutex.Unlock()
+	s.tunnelsStatus[udid] = status
+	log.WithFields(log.Fields{"udid": udid, "status": status.String()}).Debug("Tunnel status updated")
+}
+
+func (s *Service) getRsd(udid string) (rsd.RsdService, bool) {
+	s.rsdMapMutex.Lock()
+	defer s.rsdMapMutex.Unlock()
+	r, ok := s.rsdMap[udid]
+	return r, ok
+}
+
+func (s *Service) setRsd(rsd rsd.RsdService) {
+	s.rsdMapMutex.Lock()
+	defer s.rsdMapMutex.Unlock()
+	s.rsdMap[rsd.Udid] = rsd
+}
+
 func (s *Service) rsdExists(udid string) bool {
 	s.rsdMapMutex.Lock()
 	defer s.rsdMapMutex.Unlock()
@@ -392,22 +533,22 @@ func (s *Service) rsdExists(udid string) bool {
 	return exists
 }
 
-func (s *Service) updateTunnelStatus(udid string, status tunnel.TunnelStatus) {
-	s.tunnelsStatusMutex.Lock()
-	defer s.tunnelsStatusMutex.Unlock()
-	s.tunnelsStatus[udid] = status
+func (s *Service) removeRsd(udid string) {
+	s.rsdMapMutex.Lock()
+	defer s.rsdMapMutex.Unlock()
+	delete(s.rsdMap, udid)
 }
 
-func (s *Service) getTunnelStatus(w http.ResponseWriter, r *http.Request) {
+func (s *Service) createTunnelStatusResponse(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Add("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 
+	s.rsdMapMutex.Lock()
+	defer s.rsdMapMutex.Unlock()
+
 	s.tunnelsMutex.Lock()
 	defer s.tunnelsMutex.Unlock()
-
-	s.tunnelsStatusMutex.Lock()
-	defer s.tunnelsStatusMutex.Unlock()
 
 	status := struct {
 		AutoCreateTunnels bool               `json:"autoCreateTunnels"`
@@ -418,10 +559,8 @@ func (s *Service) getTunnelStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for udid, rsd := range s.rsdMap {
-		var tunnelStatus tunnel.TunnelStatus = tunnel.Disconnected
-		if status, ok := s.tunnelsStatus[udid]; ok {
-			tunnelStatus = status
-		}
+		tunnelStatus := s.getTunnelStatus(udid)
+		paired := s.isPaired(udid)
 
 		var tunnelInfo *tunnel.Tunnel
 		if t, ok := s.tunnels[udid]; ok {
@@ -433,6 +572,7 @@ func (s *Service) getTunnelStatus(w http.ResponseWriter, r *http.Request) {
 		status.Devices = append(status.Devices, DeviceTunnelInfo{
 			Udid:         rsd.Udid,
 			Version:      rsd.DeviceIosVersion,
+			Paired:       paired,
 			TunnelStatus: tunnelStatus.String(),
 			TunnelInfo:   tunnelInfo,
 		})
