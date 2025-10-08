@@ -4,25 +4,47 @@ type TunnelStatus int
 
 func (t TunnelStatus) String() string {
 	switch t {
-	case Connecting:
-		return "Connecting"
+	case Disconnected:
+		return "Disconnected"
+	case ConnectingToDevice:
+		return "ConnectingToDevice"
+	case VerifyingPairing:
+		return "VerifyingPairing"
 	case Pairing:
 		return "Pairing"
+	case Paired:
+		return "ConnectingToTunnel"
 	case Failed:
 		return "Failed"
 	case Connected:
 		return "Connected"
-	case Disconnected:
-		return "Disconnected"
 	default:
 		return "Unknown"
 	}
 }
 
 const (
-	Connecting TunnelStatus = iota
+	Disconnected TunnelStatus = iota
+	ConnectingToDevice
+	VerifyingPairing
 	Pairing
+	Paired
 	Failed
 	Connected
-	Disconnected
 )
+
+type TunnelEventType string
+
+const (
+	DeviceNotPaired TunnelEventType = "DEVICE_NOT_PAIRED"
+	DevicePaired    TunnelEventType = "DEVICE_PAIRED"
+	TunnelProgress  TunnelEventType = "TUNNEL_PROGRESS"
+)
+
+type TunnelEvent struct {
+	Type   TunnelEventType
+	Udid   string
+	Status TunnelStatus
+}
+
+type EventHandler func(event TunnelEvent)

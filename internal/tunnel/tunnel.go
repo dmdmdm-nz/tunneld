@@ -38,66 +38,142 @@ func (t Tunnel) Close() error {
 
 // ManualPairAndConnectToTunnel tries to verify an existing pairing, and if this fails it triggers a new manual pairing process.
 // After a successful pairing a tunnel for this device gets started and the tunnel information is returned
-func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, addr string, udid string, updateStatusCallback func(string, TunnelStatus)) (Tunnel, error) {
-	updateStatusCallback(udid, Connecting)
+func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, addr string, udid string, autoPair bool, tn *TunnelNotifications) (Tunnel, error) {
+	tn.NotifyTunnelStatus(udid, ConnectingToDevice)
 
 	resumeRemoted, err := SuspendRemoted()
 	if err != nil {
-		updateStatusCallback(udid, Failed)
+		tn.NotifyTunnelStatus(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to suspend remoted: %w", err)
 	}
 	defer resumeRemoted()
 
 	port, err := getUntrustedTunnelServicePort(addr)
 	if err != nil {
-		updateStatusCallback(udid, Failed)
+		tn.NotifyTunnelStatus(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: could not find port for '%s'", untrustedTunnelServiceName)
 	}
 	conn, err := ConnectTUN(addr, port)
 	if err != nil {
-		updateStatusCallback(udid, Failed)
+		tn.NotifyTunnelStatus(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to connect to TUN device: %w", err)
 	}
 	defer conn.Close()
 
 	h, err := http.NewHttpConnection(conn)
 	if err != nil {
-		updateStatusCallback(udid, Failed)
+		tn.NotifyTunnelStatus(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create HTTP2 connection: %w", err)
 	}
 
 	xpcConn, err := CreateXpcConnection(h)
 	if err != nil {
-		updateStatusCallback(udid, Failed)
+		tn.NotifyTunnelStatus(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create RemoteXPC connection: %w", err)
 	}
 	ts := newTunnelServiceWithXpc(xpcConn, h, p)
 
-	updateStatusCallback(udid, Pairing)
-	pairingResult, err := ts.ManualPair(ctx)
+	tn.NotifyTunnelStatus(udid, VerifyingPairing)
+	pairingResult, err := ts.VerifyPairing(ctx, udid)
 	if err != nil {
-		updateStatusCallback(udid, Failed)
-		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to pair device: %w", err)
+		tn.NotifyTunnelStatus(udid, Failed)
+		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to verify pairing: %w", err)
 	}
 
-	if pairingResult.NewPairing {
-		// We need to re-establish the connection after a new pairing.
-		return Tunnel{}, errors.New("ManualPairAndConnectToTunnel: new pairing created, re-attempting connection")
+	if pairingResult.NeedsPairing {
+		tn.NotifyDeviceNotPaired(udid)
+
+		if autoPair {
+			tn.NotifyTunnelStatus(udid, Pairing)
+			pairingResult, err = ts.ManualPair(ctx, udid, pairingResult.SharedSecret)
+			if err == nil {
+				// We need to re-establish the connection after a new pairing.
+				tn.NotifyTunnelStatus(udid, Disconnected)
+				return Tunnel{}, errors.New("ManualPairAndConnectToTunnel: new pairing created, re-attempting connection")
+			} else {
+				tn.NotifyTunnelStatus(udid, Failed)
+				return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: pairing failed: %w", err)
+			}
+		} else {
+			tn.NotifyTunnelStatus(udid, Failed)
+			return Tunnel{}, errors.New("ManualPairAndConnectToTunnel: device not paired")
+		}
 	}
+
+	tn.NotifyDevicePaired(udid)
+	tn.NotifyTunnelStatus(udid, Paired)
 
 	tunnelInfo, err := ts.createTunnelListener(pairingResult.SharedSecret)
 	if err != nil {
-		updateStatusCallback(udid, Failed)
+		tn.NotifyTunnelStatus(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create tunnel listener: %w", err)
 	}
 	t, err := connectToTunnel(ctx, tunnelInfo, addr, udid, pairingResult.SharedSecret)
 	if err != nil {
-		updateStatusCallback(udid, Failed)
+		tn.NotifyTunnelStatus(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to connect to tunnel: %w", err)
 	}
 
-	updateStatusCallback(udid, Connected)
+	tn.NotifyTunnelStatus(udid, Connected)
 	return t, nil
+}
+
+// ManualPair tries to verify an existing pairing, and if this fails it triggers a new manual pairing process.
+func ManualPair(ctx context.Context, p *PairRecordManager, addr string, udid string, tn *TunnelNotifications) error {
+	tn.NotifyTunnelStatus(udid, ConnectingToDevice)
+
+	resumeRemoted, err := SuspendRemoted()
+	if err != nil {
+		tn.NotifyTunnelStatus(udid, Failed)
+		return fmt.Errorf("ManualPair: failed to suspend remoted: %w", err)
+	}
+	defer resumeRemoted()
+
+	port, err := getUntrustedTunnelServicePort(addr)
+	if err != nil {
+		tn.NotifyTunnelStatus(udid, Failed)
+		return fmt.Errorf("ManualPair: could not find port for '%s'", untrustedTunnelServiceName)
+	}
+	conn, err := ConnectTUN(addr, port)
+	if err != nil {
+		tn.NotifyTunnelStatus(udid, Failed)
+		return fmt.Errorf("ManualPair: failed to connect to TUN device: %w", err)
+	}
+	defer conn.Close()
+
+	h, err := http.NewHttpConnection(conn)
+	if err != nil {
+		tn.NotifyTunnelStatus(udid, Failed)
+		return fmt.Errorf("ManualPair: failed to create HTTP2 connection: %w", err)
+	}
+
+	xpcConn, err := CreateXpcConnection(h)
+	if err != nil {
+		tn.NotifyTunnelStatus(udid, Failed)
+		return fmt.Errorf("ManualPair: failed to create RemoteXPC connection: %w", err)
+	}
+	ts := newTunnelServiceWithXpc(xpcConn, h, p)
+
+	tn.NotifyTunnelStatus(udid, VerifyingPairing)
+	pairingResult, err := ts.VerifyPairing(ctx, udid)
+	if err != nil {
+		tn.NotifyTunnelStatus(udid, Failed)
+		return fmt.Errorf("ManualPairAndConnectToTunnel: failed to verify pairing: %w", err)
+	}
+
+	if pairingResult.NeedsPairing {
+		tn.NotifyDeviceNotPaired(udid)
+		tn.NotifyTunnelStatus(udid, Pairing)
+		pairingResult, err = ts.ManualPair(ctx, udid, pairingResult.SharedSecret)
+		if err != nil {
+			tn.NotifyTunnelStatus(udid, Failed)
+			return fmt.Errorf("ManualPairAndConnectToTunnel: pairing failed: %w", err)
+		}
+	}
+
+	tn.NotifyDevicePaired(udid)
+	tn.NotifyTunnelStatus(udid, Disconnected)
+	return nil
 }
 
 func getUntrustedTunnelServicePort(addr string) (int, error) {
