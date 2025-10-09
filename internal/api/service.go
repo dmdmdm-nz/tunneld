@@ -218,6 +218,31 @@ func (s *Service) startApiService(ctx context.Context) error {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+	mux.HandleFunc("/services/", func(w http.ResponseWriter, r *http.Request) {
+		udid := strings.TrimPrefix(r.URL.Path, "/services/")
+		if len(udid) == 0 {
+			return
+		}
+
+		tunnel, ok := s.tunnels[string(udid)]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Add("Content-Type", "application/json")
+			enc := json.NewEncoder(w)
+			err := enc.Encode(tunnel.Services)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to encode tunnel info: %v", err), http.StatusInternalServerError)
+				return
+			}
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 	mux.HandleFunc("/tunnels", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Add("Content-Type", "application/json")
 		enc := json.NewEncoder(writer)

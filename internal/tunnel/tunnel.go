@@ -22,13 +22,14 @@ const TUNNEL_MTU = 64_000
 
 // Tunnel describes the parameters of an established tunnel to the device
 type Tunnel struct {
-	Address          string          `json:"address"`          // Address is the IPv6 address of the device over the tunnel
-	RsdPort          int             `json:"rsdPort"`          // RsdPort is the port on which remote service discover is reachable
-	Udid             string          `json:"udid"`             // Udid is the id of the device for this tunnel
-	UserspaceTUN     bool            `json:"userspaceTun"`     // Always false
-	UserspaceTUNPort int             `json:"userspaceTunPort"` // Always 0
-	TunnelContext    context.Context `json:"-"`
-	closer           func() error    `json:"-"`
+	Address          string           `json:"address"`          // Address is the IPv6 address of the device over the tunnel
+	RsdPort          int              `json:"rsdPort"`          // RsdPort is the port on which remote service discover is reachable
+	Services         []RsdServiceInfo `json:"-"`                // Services is the list of RSD services available on the device
+	Udid             string           `json:"udid"`             // Udid is the id of the device for this tunnel
+	UserspaceTUN     bool             `json:"userspaceTun"`     // Always false
+	UserspaceTUNPort int              `json:"userspaceTunPort"` // Always 0
+	TunnelContext    context.Context  `json:"-"`
+	closer           func() error     `json:"-"`
 }
 
 // Close closes the connection to the device and removes the virtual network interface from the host
@@ -248,9 +249,16 @@ func connectToTunnel(ctx context.Context, info tunnelListener, addr string, udid
 		closeFunc()
 	}()
 
+	services, err := listRsdServices(tunnelInfo.ServerAddress, int(tunnelInfo.ServerRSDPort))
+	if err != nil {
+		closeFunc()
+		return Tunnel{}, fmt.Errorf("could not list RSD services: %w", err)
+	}
+
 	return Tunnel{
 		Address:       tunnelInfo.ServerAddress,
 		RsdPort:       int(tunnelInfo.ServerRSDPort),
+		Services:      services,
 		Udid:          udid,
 		TunnelContext: tunnelCtx,
 		closer:        closeFunc,
@@ -411,4 +419,25 @@ func exchangeCoreTunnelParameters(stream io.ReadWriteCloser) (tunnelParameters, 
 		return tunnelParameters{}, err
 	}
 	return parameters, nil
+}
+
+func listRsdServices(address string, port int) ([]RsdServiceInfo, error) {
+	rsd, err := NewWithAddrPort(address, port)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RSD service: %w", err)
+	}
+
+	handshakeResponse, err := rsd.Handshake()
+	if err != nil {
+		return nil, fmt.Errorf("failed to perform RSD handshake: %w", err)
+	}
+
+	services := handshakeResponse.GetServices()
+
+	portList := make([]RsdServiceInfo, 0, len(services))
+	for key, svc := range services {
+		portList = append(portList, RsdServiceInfo{Name: key, Port: svc.Port})
+	}
+
+	return portList, nil
 }

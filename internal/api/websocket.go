@@ -13,9 +13,10 @@ import (
 )
 
 type WebSocketTunnelInfo struct {
-	Status  string `json:"status"`
-	Address string `json:"address"`
-	RsdPort int    `json:"rsdPort"`
+	Status   string                  `json:"status"`
+	Address  string                  `json:"address"`
+	RsdPort  int                     `json:"rsdPort"`
+	Services []tunnel.RsdServiceInfo `json:"services"`
 }
 
 type CreateTunnelResponse struct {
@@ -84,9 +85,10 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 	}
 
 	response := WebSocketTunnelInfo{
-		Status:  "Success",
-		Address: tunnel.Address,
-		RsdPort: tunnel.RsdPort,
+		Status:   "Success",
+		Address:  tunnel.Address,
+		RsdPort:  tunnel.RsdPort,
+		Services: tunnel.Services,
 	}
 	b, _ := json.Marshal(response)
 	_ = c.Write(ctx, websocket.MessageText, b)
