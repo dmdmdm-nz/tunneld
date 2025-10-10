@@ -48,3 +48,8 @@ type TunnelEvent struct {
 }
 
 type EventHandler func(event TunnelEvent)
+
+type RsdServiceInfo struct {
+	Name string `json:"name"`
+	Port uint32 `json:"port"`
+}
