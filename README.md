@@ -40,6 +40,13 @@ DELETE /tunnel/<udid>
 GET /tunnels
 ```
 
+Additional API endpoints:
+
+```
+GET /status
+GET /services/<udid>
+```
+
 WebSocket On-demand API:
 
 ```
