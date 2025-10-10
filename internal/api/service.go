@@ -192,6 +192,7 @@ func (s *Service) startApiService(ctx context.Context) error {
 	mux.HandleFunc("/tunnel/", func(w http.ResponseWriter, r *http.Request) {
 		udid := strings.TrimPrefix(r.URL.Path, "/tunnel/")
 		if len(udid) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
@@ -221,6 +222,7 @@ func (s *Service) startApiService(ctx context.Context) error {
 	mux.HandleFunc("/services/", func(w http.ResponseWriter, r *http.Request) {
 		udid := strings.TrimPrefix(r.URL.Path, "/services/")
 		if len(udid) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
