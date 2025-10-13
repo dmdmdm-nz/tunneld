@@ -86,6 +86,8 @@ func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, add
 
 		if autoPair {
 			tn.NotifyTunnelStatus(udid, Pairing)
+			log.WithField("udid", udid).Info("Device needs pairing, displaying dialog")
+
 			pairingResult, err = ts.ManualPair(ctx, udid, pairingResult.SharedSecret)
 			if err == nil {
 				// We need to re-establish the connection after a new pairing.
@@ -165,6 +167,8 @@ func ManualPair(ctx context.Context, p *PairRecordManager, addr string, udid str
 	if pairingResult.NeedsPairing {
 		tn.NotifyDeviceNotPaired(udid)
 		tn.NotifyTunnelStatus(udid, Pairing)
+		log.WithField("udid", udid).Info("Device needs pairing, displaying dialog")
+
 		pairingResult, err = ts.ManualPair(ctx, udid, pairingResult.SharedSecret)
 		if err != nil {
 			tn.NotifyTunnelStatus(udid, Failed)
