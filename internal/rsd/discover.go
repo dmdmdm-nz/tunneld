@@ -72,7 +72,7 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 				defer resumeRemoted()
 
 				svc := RsdService{
-					Address:       fmt.Sprintf("%s%%%s", entry.AddrIPv6[0].String(), iface.Name),
+					Address:       fmt.Sprintf("%s%%%d", entry.AddrIPv6[0].String(), resultInterface.Index),
 					InterfaceName: iface.Name,
 				}
 				svc.Udid, svc.DeviceIosVersion, err = TryGetRsdInfo(ctx, svc.Address)
