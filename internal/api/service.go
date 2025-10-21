@@ -31,6 +31,9 @@ type Service struct {
 	tunnelsMutex sync.Mutex
 	tunnels      map[string]*tunnel.Tunnel
 
+	devicesReadyMutex sync.Mutex
+	devicesReady      map[string]bool
+
 	pairedStatusMutex sync.Mutex
 	pairedStatus      map[string]bool
 
@@ -59,6 +62,7 @@ func NewService(host string, port int, autoCreateTunnels bool) *Service {
 		tunnels:           make(map[string]*tunnel.Tunnel),
 		tunnelsStatus:     make(map[string]tunnel.TunnelStatus),
 		pairedStatus:      make(map[string]bool),
+		devicesReady:      make(map[string]bool),
 		rsdMap:            make(map[string]rsd.RsdService),
 	}
 }
@@ -102,8 +106,10 @@ func (s *Service) Start(ctx context.Context) error {
 				switch ev.Type {
 				case tunnel.DeviceNotPaired:
 					s.setPaired(ev.Udid, false)
+					s.setDeviceReady(ev.Udid, true)
 				case tunnel.DevicePaired:
 					s.setPaired(ev.Udid, true)
+					s.setDeviceReady(ev.Udid, true)
 				case tunnel.TunnelProgress:
 					s.setTunnelStatus(ev.Udid, ev.Status)
 				}
@@ -127,6 +133,7 @@ func (s *Service) Start(ctx context.Context) error {
 						s.runAutoTunnel(ctx, ev)
 					}()
 				} else {
+					s.setDeviceReady(ev.Info.Udid, false)
 					s.setPaired(ev.Info.Udid, false)
 				}
 			case rsd.RsdServiceRemoved:
@@ -276,6 +283,11 @@ func (s *Service) startApiService(ctx context.Context) error {
 
 		if !s.rsdExists(udid) {
 			http.Error(w, "No RSD service found for the given UDID", http.StatusNotFound)
+			return
+		}
+
+		if !s.isDeviceReady(udid) {
+			http.Error(w, "Device is not ready", http.StatusNotFound)
 			return
 		}
 
@@ -495,6 +507,19 @@ func (s *Service) tunnelExists(udid string) bool {
 	defer s.tunnelsMutex.Unlock()
 	_, exists := s.tunnels[udid]
 	return exists
+}
+
+func (s *Service) isDeviceReady(udid string) bool {
+	s.devicesReadyMutex.Lock()
+	defer s.devicesReadyMutex.Unlock()
+	ready, ok := s.devicesReady[udid]
+	return ready && ok
+}
+
+func (s *Service) setDeviceReady(udid string, ready bool) {
+	s.devicesReadyMutex.Lock()
+	defer s.devicesReadyMutex.Unlock()
+	s.devicesReady[udid] = ready
 }
 
 func (s *Service) isPaired(udid string) bool {
