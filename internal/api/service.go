@@ -253,50 +253,68 @@ func (s *Service) startApiService(ctx context.Context) error {
 		}
 	})
 	mux.HandleFunc("/tunnels", func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Add("Content-Type", "application/json")
-		enc := json.NewEncoder(writer)
+		switch request.Method {
+		case http.MethodGet:
+			writer.Header().Add("Content-Type", "application/json")
+			enc := json.NewEncoder(writer)
 
-		s.tunnelsMutex.Lock()
-		defer s.tunnelsMutex.Unlock()
+			s.tunnelsMutex.Lock()
+			defer s.tunnelsMutex.Unlock()
 
-		tunnels := make([]tunnel.Tunnel, 0, len(s.tunnels))
-		for _, t := range s.tunnels {
-			tunnels = append(tunnels, *t)
-		}
-		err := enc.Encode(tunnels)
-		if err != nil {
-			http.Error(writer, err.Error(), http.StatusInternalServerError)
-			return
+			tunnels := make([]tunnel.Tunnel, 0, len(s.tunnels))
+			for _, t := range s.tunnels {
+				tunnels = append(tunnels, *t)
+			}
+			err := enc.Encode(tunnels)
+			if err != nil {
+				http.Error(writer, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		default:
+			http.Error(writer, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 	mux.HandleFunc("/ws/create-tunnel", func(w http.ResponseWriter, r *http.Request) {
-		udid := r.URL.Query().Get("udid")
-		if udid == "" {
-			http.Error(w, "missing udid", http.StatusBadRequest)
-			return
-		}
+		switch r.Method {
+		case http.MethodGet:
+			udid := r.URL.Query().Get("udid")
+			if udid == "" {
+				http.Error(w, "missing udid", http.StatusBadRequest)
+				return
+			}
 
-		if s.autoCreateTunnels {
-			http.Error(w, "Cannot manually create tunnels when autoCreateTunnels is enabled.", http.StatusMethodNotAllowed)
-			return
-		}
+			if s.autoCreateTunnels {
+				http.Error(w, "Cannot manually create tunnels when autoCreateTunnels is enabled.", http.StatusMethodNotAllowed)
+				return
+			}
 
-		if !s.rsdExists(udid) {
-			http.Error(w, "No RSD service found for the given UDID", http.StatusNotFound)
-			return
-		}
+			if !s.rsdExists(udid) {
+				http.Error(w, "No RSD service found for the given UDID", http.StatusNotFound)
+				return
+			}
 
-		if !s.isDeviceReady(udid) {
-			http.Error(w, "Device is not ready", http.StatusNotFound)
-			return
-		}
+			if !s.isDeviceReady(udid) {
+				http.Error(w, "Device is not ready", http.StatusNotFound)
+				return
+			}
 
-		if !s.isPaired(udid) {
-			http.Error(w, "Device has not been paired", http.StatusConflict)
-			return
-		}
+			if !s.isPaired(udid) {
+				http.Error(w, "Device has not been paired", http.StatusConflict)
+				return
+			}
 
-		CreateWebSocketTunnel(s, string(udid), w, r)
+			CreateWebSocketTunnel(s, string(udid), w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/ws/pause-remoted", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			PauseRemoteD(s, w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

@@ -51,6 +51,7 @@ WebSocket On-demand API:
 
 ```
 GET /ws/create-tunnel?udid=<udid>
+GET /ws/pause-remoted
 ```
 
 ## Thanks

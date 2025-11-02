@@ -34,6 +34,30 @@ func accept(w http.ResponseWriter, r *http.Request) (*websocket.Conn, context.Co
 	return c, r.Context(), nil
 }
 
+func PauseRemoteD(s *Service, w http.ResponseWriter, r *http.Request) {
+	c, ctx, err := accept(w, r)
+	if err != nil {
+		log.Error("Failed to accept client:", err)
+		return
+	}
+	defer c.Close(websocket.StatusNormalClosure, "closing")
+
+	resumeRemoted, err := tunnel.SuspendRemoted()
+	if err != nil {
+		log.Errorf("Failed to pause RemoteD: %v", err)
+		return
+	}
+
+	defer resumeRemoted()
+
+	for {
+		_, _, err := c.Read(ctx)
+		if err != nil {
+			return
+		}
+	}
+}
+
 func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *http.Request) {
 	c, ctx, err := accept(w, r)
 	if err != nil {
