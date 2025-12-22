@@ -1,6 +1,6 @@
 # TunnelD
 
-Creates RSD tunnels to iOS 17+ devices. 
+Creates RSD tunnels to iOS 17+ devices.
 
 Based off Go-iOS's tunnel service but with a few differences:
 
@@ -31,6 +31,7 @@ Usage of ./tunneld:
 ## API
 
 Go-iOS compatible API:
+
 ```
 GET /health
 GET /ready
@@ -44,6 +45,7 @@ Additional API endpoints:
 
 ```
 GET /status
+GET /metrics
 GET /services/<udid>
 ```
 

@@ -324,6 +324,14 @@ func (s *Service) startApiService(ctx context.Context) error {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.createPrometheusMetricsResponse(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 
 	addr := fmt.Sprintf("%s:%d", s.address, s.port)
 	return http.ListenAndServe(addr, mux)
@@ -607,6 +615,94 @@ func (s *Service) removeRsd(udid string) {
 	s.rsdMapMutex.Lock()
 	defer s.rsdMapMutex.Unlock()
 	delete(s.rsdMap, udid)
+}
+
+func (s *Service) createPrometheusMetricsResponse(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+	s.rsdMapMutex.Lock()
+	defer s.rsdMapMutex.Unlock()
+
+	s.tunnelsMutex.Lock()
+	defer s.tunnelsMutex.Unlock()
+
+	var sb strings.Builder
+
+	// Auto create tunnels gauge
+	autoCreateValue := 0
+	if s.autoCreateTunnels {
+		autoCreateValue = 1
+	}
+	sb.WriteString("# HELP tunneld_auto_create_tunnels Whether auto tunnel creation is enabled (1=enabled, 0=disabled)\n")
+	sb.WriteString("# TYPE tunneld_auto_create_tunnels gauge\n")
+	sb.WriteString(fmt.Sprintf("tunneld_auto_create_tunnels %d\n", autoCreateValue))
+
+	// Total devices gauge
+	sb.WriteString("# HELP tunneld_devices_total Total number of discovered devices\n")
+	sb.WriteString("# TYPE tunneld_devices_total gauge\n")
+	sb.WriteString(fmt.Sprintf("tunneld_devices_total %d\n", len(s.rsdMap)))
+
+	// Device info metric (info-style metric with labels)
+	sb.WriteString("# HELP tunneld_device_info Information about discovered devices\n")
+	sb.WriteString("# TYPE tunneld_device_info gauge\n")
+	for udid, rsd := range s.rsdMap {
+		tunnelStatus := s.getTunnelStatus(udid)
+		paired := s.isPaired(udid)
+		pairedStr := "false"
+		if paired {
+			pairedStr = "true"
+		}
+		sb.WriteString(fmt.Sprintf("tunneld_device_info{udid=%q,version=%q,paired=%q,tunnel_status=%q} 1\n",
+			rsd.Udid, rsd.DeviceIosVersion, pairedStr, tunnelStatus.String()))
+	}
+
+	// Paired devices gauge
+	sb.WriteString("# HELP tunneld_devices_paired_total Total number of paired devices\n")
+	sb.WriteString("# TYPE tunneld_devices_paired_total gauge\n")
+	pairedCount := 0
+	for udid := range s.rsdMap {
+		if s.isPaired(udid) {
+			pairedCount++
+		}
+	}
+	sb.WriteString(fmt.Sprintf("tunneld_devices_paired_total %d\n", pairedCount))
+
+	// Connected tunnels gauge
+	sb.WriteString("# HELP tunneld_tunnels_connected_total Total number of connected tunnels\n")
+	sb.WriteString("# TYPE tunneld_tunnels_connected_total gauge\n")
+	connectedCount := 0
+	for udid := range s.rsdMap {
+		if s.getTunnelStatus(udid) == tunnel.Connected {
+			connectedCount++
+		}
+	}
+	sb.WriteString(fmt.Sprintf("tunneld_tunnels_connected_total %d\n", connectedCount))
+
+	// Tunnel status by device
+	sb.WriteString("# HELP tunneld_tunnel_status Tunnel status by device (1 if in this status, 0 otherwise)\n")
+	sb.WriteString("# TYPE tunneld_tunnel_status gauge\n")
+	statusValues := []tunnel.TunnelStatus{
+		tunnel.Disconnected,
+		tunnel.ConnectingToDevice,
+		tunnel.VerifyingPairing,
+		tunnel.Pairing,
+		tunnel.Paired,
+		tunnel.Failed,
+		tunnel.Connected,
+	}
+	for udid := range s.rsdMap {
+		currentStatus := s.getTunnelStatus(udid)
+		for _, status := range statusValues {
+			value := 0
+			if currentStatus == status {
+				value = 1
+			}
+			sb.WriteString(fmt.Sprintf("tunneld_tunnel_status{udid=%q,status=%q} %d\n",
+				udid, status.String(), value))
+		}
+	}
+
+	w.Write([]byte(sb.String()))
 }
 
 func (s *Service) createTunnelStatusResponse(w http.ResponseWriter, r *http.Request) {
