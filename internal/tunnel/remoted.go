@@ -28,6 +28,33 @@ func SuspendRemoted() (func(), error) {
 	return instance.suspendRemoted()
 }
 
+// ForceResumeRemoted ensures remoted is resumed regardless of suspend count.
+// This should be called during application shutdown to ensure remoted is not left suspended.
+func ForceResumeRemoted() error {
+	if instance == nil {
+		return nil
+	}
+	return instance.forceResume()
+}
+
+func (r *RemotedService) forceResume() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.isSuspended {
+		return nil
+	}
+
+	if err := signalRemotedResume(); err != nil {
+		return err
+	}
+
+	r.isSuspended = false
+	r.suspendCount = 0
+
+	return nil
+}
+
 // suspendRemoted suspends the remoted service by sending a SIGSTOP signal.
 // It returns a function that, when called, will resume the remoted service.
 func (r *RemotedService) suspendRemoted() (func(), error) {
@@ -43,6 +70,8 @@ func (r *RemotedService) suspendRemoted() (func(), error) {
 		}
 
 		r.isSuspended = true
+	} else {
+		log.Trace("Remoted service is already suspended; current count:", r.suspendCount+1)
 	}
 	r.suspendCount++
 	r.mu.Unlock()
@@ -52,6 +81,7 @@ func (r *RemotedService) suspendRemoted() (func(), error) {
 		defer r.mu.Unlock()
 
 		if r.suspendCount > 0 {
+			log.Trace("Not resuming remoted service; current count:", r.suspendCount-1)
 			r.suspendCount--
 		}
 
@@ -76,7 +106,7 @@ func signalRemotedSuspend() error {
 		return fmt.Errorf("failed to suspend remoted: %v, output: %s", err, out)
 	}
 
-	log.Info("Suspended remoted service")
+	log.Debug("Suspended remoted service")
 	return nil
 }
 
@@ -91,6 +121,6 @@ func signalRemotedResume() error {
 		return fmt.Errorf("failed to resume remoted: %v, output: %s", err, out)
 	}
 
-	log.Info("Resumed remoted service")
+	log.Debug("Resumed remoted service")
 	return nil
 }

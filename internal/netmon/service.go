@@ -111,7 +111,7 @@ func (s *Service) checkInterfaces() {
 
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		log.Infof("Error getting network interfaces: %v", err)
+		log.Errorf("Error getting network interfaces: %v", err)
 		return
 	}
 
@@ -121,7 +121,7 @@ func (s *Service) checkInterfaces() {
 			// Skip down interfaces
 			log.WithFields(log.Fields{
 				"interface": iface.Name,
-			}).Debug("Skipping down interface")
+			}).Trace("Skipping down interface")
 			continue
 		}
 
@@ -129,7 +129,7 @@ func (s *Service) checkInterfaces() {
 			// Only check "en" interfaces
 			log.WithFields(log.Fields{
 				"interface": iface.Name,
-			}).Debug("Skipping non-en interface")
+			}).Trace("Skipping non-en interface")
 			continue
 		}
 
@@ -140,7 +140,7 @@ func (s *Service) checkInterfaces() {
 		} else {
 			log.WithFields(log.Fields{
 				"interface": iface.Name,
-			}).Debug("Skipping non-IPv6-only interface")
+			}).Trace("Skipping non-IPv6-only interface")
 		}
 	}
 
@@ -160,7 +160,7 @@ func (s *Service) checkInterfaces() {
 func (s *Service) checkInterfaceForIpV6(iface *net.Interface) bool {
 	addrs, err := iface.Addrs()
 	if err != nil {
-		log.Infof("Error getting addresses for interface %s: %v", iface.Name, err)
+		log.Errorf("Error getting addresses for interface %s: %v", iface.Name, err)
 		return false
 	}
 

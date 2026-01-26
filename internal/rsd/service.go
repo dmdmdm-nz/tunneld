@@ -130,7 +130,7 @@ func (s *Service) handleNetworkInterfaceEvent(ctx context.Context, ev netmon.Int
 		go func() {
 			rsdService, err := FindRsdService(ctx, ev.InterfaceName)
 			if err != nil {
-				log.WithField("interface", ev.InterfaceName).WithError(err)
+				log.WithField("interface", ev.InterfaceName).WithError(err).Debug("Stopped looking for an RSD service")
 				return
 			}
 
