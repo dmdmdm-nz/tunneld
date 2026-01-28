@@ -389,7 +389,7 @@ func (s *Service) runAutoTunnel(ctx context.Context, ev rsd.RsdServiceEvent) {
 				}
 			}
 
-			log.Info("Not recreating tunnel for ", ev.Info.Udid)
+			log.Debug("Interface is gone, not recreating tunnel for ", ev.Info.Udid)
 			return
 		}
 	}

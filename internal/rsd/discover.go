@@ -36,7 +36,7 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 		iface, err := GetInterfaceByName(interfaceName)
 		if err != nil {
 			// The interface we're browsing on has gone away.
-			log.WithField("interface", interfaceName).WithError(err).Debug("Failed to get interface")
+			log.WithField("interface", interfaceName).WithError(err).Trace("Failed to get interface")
 			return RsdService{}, err
 		}
 
@@ -61,7 +61,7 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 				resultInterface, err := net.InterfaceByIndex(entry.ReceivedIfIndex)
 				if err != nil {
 					log.WithField("index", entry.ReceivedIfIndex).
-						Error("Failed to get interface by index:", err.Error())
+						Trace("Failed to get interface by index:", err.Error())
 					continue
 				}
 
@@ -97,8 +97,12 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 			browseCancel()
 			lastErr = err
 		case <-attemptCtx.Done():
-			log.WithField("interface", interfaceName).Debug("Did not find an RSD service within the time out")
 			browseCancel()
+			// Check if parent context was cancelled (shutdown) vs actual timeout
+			if ctx.Err() != nil {
+				return RsdService{}, ctx.Err()
+			}
+			log.WithField("interface", interfaceName).Debug("Did not find an RSD service within the time out")
 			lastErr = errors.New("no RSD service found within timeout")
 		}
 	}
