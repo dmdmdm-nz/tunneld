@@ -13,6 +13,7 @@ import (
 	"github.com/dmdmdm-nz/tunneld/internal/netmon"
 	"github.com/dmdmdm-nz/tunneld/internal/rsd"
 	"github.com/dmdmdm-nz/tunneld/internal/runtime"
+	"github.com/dmdmdm-nz/tunneld/internal/tunnel"
 	"github.com/dmdmdm-nz/tunneld/pkg/cli"
 )
 
@@ -66,6 +67,11 @@ func main() {
 	if err := super.Wait(ctx); err != nil {
 		log.Error("supervisor wait failed", "err", err)
 		os.Exit(1)
+	}
+
+	// Ensure remoted is resumed on shutdown in case it was left suspended
+	if err := tunnel.ForceResumeRemoted(); err != nil {
+		log.WithError(err).Warn("Failed to resume remoted service during shutdown")
 	}
 }
 

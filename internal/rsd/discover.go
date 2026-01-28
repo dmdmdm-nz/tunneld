@@ -21,6 +21,13 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 	const maxAttempts = 30
 	var lastErr error
 
+	resumeRemoted, err := tunnel.SuspendRemoted()
+	if err != nil {
+		log.WithField("interface", interfaceName).Error("Failed to suspend remoted:", err.Error())
+		return RsdService{}, fmt.Errorf("failed to suspend remoted: %w", err)
+	}
+	defer resumeRemoted()
+
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		entries := make(chan *zeroconf.ServiceEntry)
 		resultCh := make(chan RsdService, 1)
@@ -51,7 +58,6 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 
 		go func(results <-chan *zeroconf.ServiceEntry) {
 			for entry := range results {
-
 				resultInterface, err := net.InterfaceByIndex(entry.ReceivedIfIndex)
 				if err != nil {
 					log.WithField("index", entry.ReceivedIfIndex).
@@ -62,14 +68,6 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 				if resultInterface.Name != interfaceName {
 					continue
 				}
-
-				resumeRemoted, err := tunnel.SuspendRemoted()
-				if err != nil {
-					log.WithField("interface", resultInterface.Name).
-						Error("Failed to suspend remoted:", err.Error())
-					continue
-				}
-				defer resumeRemoted()
 
 				svc := RsdService{
 					Address:       fmt.Sprintf("%s%%%d", entry.AddrIPv6[0].String(), resultInterface.Index),
@@ -95,9 +93,11 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 			browseCancel()
 			return svc, nil
 		case err := <-errCh:
+			log.WithField("interface", interfaceName).Error("Browse error:", err.Error())
 			browseCancel()
 			lastErr = err
 		case <-attemptCtx.Done():
+			log.WithField("interface", interfaceName).Debug("Did not find an RSD service within the time out")
 			browseCancel()
 			lastErr = errors.New("no RSD service found within timeout")
 		}
