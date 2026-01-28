@@ -385,6 +385,13 @@ func (s *Service) runAutoTunnel(ctx context.Context, ev rsd.RsdServiceEvent) {
 
 		if s.autoCreateTunnels {
 			if s.rsdExists(ev.Info.Udid) {
+				// Check if we're shutting down before attempting to recreate
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
 				// Try to recreate the tunnel
 				log.WithFields(log.Fields{
 					"interface": ev.Info.InterfaceName,
