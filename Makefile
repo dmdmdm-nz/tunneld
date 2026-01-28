@@ -30,3 +30,16 @@ build-all: build-macos-arm64 build-linux-x64 build-linux-arm64
 clean:
 	rm -f ./tunneld-macos-arm64 ./tunneld-linux-x64 ./tunneld-linux-arm64
 	go clean
+
+.PHONY: test
+test:
+	go test -v ./...
+
+.PHONY: test-race
+test-race:
+	go test -race -v ./...
+
+.PHONY: test-cover
+test-cover:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
