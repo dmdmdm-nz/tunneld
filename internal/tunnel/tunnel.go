@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
+	"os"
 	"os/exec"
 
 	"github.com/dmdmdm-nz/tunneld/internal/tls"
@@ -237,8 +239,8 @@ func connectToTunnel(ctx context.Context, info tunnelListener, addr string, udid
 
 	go func() {
 		err := forwardDataToInterface(tunnelCtx, tunnelInfo.ClientParameters.Mtu, utunIface, conn)
-		if err != nil {
-			log.WithError(err).Debug("Exiting device->tunnel data forwarder")
+		if err != nil && !isClosedError(err) {
+			log.WithError(err).Trace("Exiting device->tunnel data forwarder")
 		}
 
 		closeFunc()
@@ -246,8 +248,8 @@ func connectToTunnel(ctx context.Context, info tunnelListener, addr string, udid
 
 	go func() {
 		err := forwardDataToDevice(tunnelCtx, tunnelInfo.ClientParameters.Mtu, utunIface, conn)
-		if err != nil {
-			log.WithError(err).Debug("Exiting tunnel->device data forwarder")
+		if err != nil && !isClosedError(err) {
+			log.WithError(err).Trace("Exiting tunnel->device data forwarder")
 		}
 
 		closeFunc()
@@ -323,6 +325,12 @@ func createTlsConfig(info tunnelListener, sharedSecret []byte) (*tls.Config, err
 		},
 	}
 	return conf, nil
+}
+
+// isClosedError returns true if the error is due to a closed connection or file.
+// These errors are expected during tunnel shutdown.
+func isClosedError(err error) bool {
+	return errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrClosed)
 }
 
 func forwardDataToDevice(ctx context.Context, mtu uint64, r io.Reader, conn *tls.Conn) error {

@@ -36,7 +36,7 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 		iface, err := GetInterfaceByName(interfaceName)
 		if err != nil {
 			// The interface we're browsing on has gone away.
-			log.WithField("interface", interfaceName).WithError(err).Debug("Failed to get interface")
+			log.WithField("interface", interfaceName).WithError(err).Trace("Failed to get interface")
 			return RsdService{}, err
 		}
 
@@ -61,7 +61,7 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 				resultInterface, err := net.InterfaceByIndex(entry.ReceivedIfIndex)
 				if err != nil {
 					log.WithField("index", entry.ReceivedIfIndex).
-						Error("Failed to get interface by index:", err.Error())
+						Trace("Failed to get interface by index:", err.Error())
 					continue
 				}
 

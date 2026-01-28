@@ -199,7 +199,7 @@ func newRsdServiceFromTcpConn(conn *net.TCPConn) (RsdService, error) {
 // Handshake sends a handshake request to the device and returns the RsdHandshakeResponse
 // which contains the UDID and the services available on the device.
 func (s RsdService) Handshake() (RsdHandshakeResponse, error) {
-	log.Debug("execute handshake")
+	log.Debug("Starting RSD handshake")
 	m, err := s.xpc.ReceiveOnClientServerStream()
 	if err != nil {
 		return RsdHandshakeResponse{}, fmt.Errorf("Handshake: failed to receive handshake response. %w", err)

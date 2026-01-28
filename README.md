@@ -20,8 +20,6 @@ Usage of ./tunneld:
         Host to bind to (default "127.0.0.1")
   -log-level string
         Log level (trace, debug, info, warn, error) (default "info")
-  -poll-interval int
-        Interface poll interval in seconds (default 3)
   -port int
         Port to listen on (default 60105)
   -version

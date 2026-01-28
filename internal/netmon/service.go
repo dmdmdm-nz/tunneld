@@ -12,20 +12,22 @@ import (
 )
 
 type Service struct {
-	pollInterval     time.Duration
-	interfaces       map[string]struct{}
-	subsMu           sync.Mutex
-	subs             map[int]*runtime.SubQueue[InterfaceEvent]
-	nextSubscriberID int
-	mu               sync.RWMutex
-	closed           bool
+	watcher           Watcher
+	reconcileInterval time.Duration
+	interfaces        map[string]struct{}
+	subsMu            sync.Mutex
+	subs              map[int]*runtime.SubQueue[InterfaceEvent]
+	nextSubscriberID  int
+	mu                sync.RWMutex
+	closed            bool
 }
 
-func NewService(pollInterval time.Duration) *Service {
+func NewService() *Service {
 	return &Service{
-		pollInterval: pollInterval,
-		interfaces:   make(map[string]struct{}),
-		subs:         make(map[int]*runtime.SubQueue[InterfaceEvent]),
+		watcher:           NewWatcher(),
+		reconcileInterval: 5 * time.Minute,
+		interfaces:        make(map[string]struct{}),
+		subs:              make(map[int]*runtime.SubQueue[InterfaceEvent]),
 	}
 }
 
@@ -78,7 +80,14 @@ func (s *Service) Start(ctx context.Context) error {
 	// Initial interface check
 	s.checkInterfaces()
 
-	ticker := time.NewTicker(s.pollInterval)
+	// Start watcher in goroutine
+	watcherErr := make(chan error, 1)
+	go func() {
+		watcherErr <- s.watcher.Start(ctx, s.handleWatcherEvent)
+	}()
+
+	// Periodic reconciliation to catch any missed events
+	ticker := time.NewTicker(s.reconcileInterval)
 	defer ticker.Stop()
 
 	for {
@@ -86,8 +95,38 @@ func (s *Service) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			log.Info("Stopping network interface monitoring service")
 			return nil
+		case err := <-watcherErr:
+			if err != nil {
+				log.WithError(err).Error("Watcher failed")
+			}
+			return err
 		case <-ticker.C:
 			s.checkInterfaces()
+		}
+	}
+}
+
+func (s *Service) handleWatcherEvent(ev InterfaceEvent) {
+	switch ev.Type {
+	case InterfaceAdded:
+		s.mu.Lock()
+		if _, exists := s.interfaces[ev.InterfaceName]; !exists {
+			s.interfaces[ev.InterfaceName] = struct{}{}
+			s.mu.Unlock()
+			log.WithField("interface", ev.InterfaceName).Info("Detected new IPv6 network interface")
+			s.broadcast(ev)
+		} else {
+			s.mu.Unlock()
+		}
+	case InterfaceRemoved:
+		s.mu.Lock()
+		if _, exists := s.interfaces[ev.InterfaceName]; exists {
+			delete(s.interfaces, ev.InterfaceName)
+			s.mu.Unlock()
+			log.WithField("interface", ev.InterfaceName).Info("Detected missing IPv6 network interface")
+			s.broadcast(ev)
+		} else {
+			s.mu.Unlock()
 		}
 	}
 }
@@ -170,7 +209,8 @@ func (s *Service) checkInterfaceForIpV6(iface *net.Interface) bool {
 			continue
 		}
 
-		if ipNet.IP.To16() != nil {
+		// To4() returns nil for IPv6 addresses, non-nil for IPv4
+		if ipNet.IP.To4() == nil && ipNet.IP.To16() != nil {
 			return true
 		}
 	}

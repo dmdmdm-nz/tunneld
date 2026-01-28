@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -32,7 +31,6 @@ func main() {
 	log.Infof("Config: Port=%d", cfg.Port)
 	log.Infof("Config: LogLevel=%s", cfg.LogLevel)
 	log.Infof("Config: AutoCreateTunnels=%v", cfg.AutoCreateTunnels)
-	log.Infof("Config: InterfacePollInterval=%d second(s)", cfg.InterfacePollInterval)
 
 	if os.Geteuid() != 0 {
 		log.Fatal("The tunneld service must be run as root.")
@@ -41,7 +39,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	netmonSvc := netmon.NewService(3 * time.Second)
+	netmonSvc := netmon.NewService()
 	rsdSvc := rsd.NewService()
 	apiSvc := api.NewService(cfg.Host, cfg.Port, cfg.AutoCreateTunnels)
 
