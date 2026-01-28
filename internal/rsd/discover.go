@@ -97,8 +97,12 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 			browseCancel()
 			lastErr = err
 		case <-attemptCtx.Done():
-			log.WithField("interface", interfaceName).Debug("Did not find an RSD service within the time out")
 			browseCancel()
+			// Check if parent context was cancelled (shutdown) vs actual timeout
+			if ctx.Err() != nil {
+				return RsdService{}, ctx.Err()
+			}
+			log.WithField("interface", interfaceName).Debug("Did not find an RSD service within the time out")
 			lastErr = errors.New("no RSD service found within timeout")
 		}
 	}
