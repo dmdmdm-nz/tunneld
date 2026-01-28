@@ -25,10 +25,10 @@ type Service struct {
 
 	rsdCh       <-chan rsd.RsdServiceEvent
 	rsdUnsub    func()
-	rsdMapMutex sync.Mutex
+	rsdMapMutex sync.RWMutex
 	rsdMap      map[string]rsd.RsdService
 
-	tunnelsMutex sync.Mutex
+	tunnelsMutex sync.RWMutex
 	tunnels      map[string]*tunnel.Tunnel
 
 	devicesReadyMutex sync.Mutex
@@ -203,14 +203,15 @@ func (s *Service) startApiService(ctx context.Context) error {
 			return
 		}
 
-		tunnel, ok := s.tunnels[string(udid)]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-
 		switch r.Method {
 		case http.MethodGet:
+			s.tunnelsMutex.RLock()
+			tunnel, ok := s.tunnels[string(udid)]
+			s.tunnelsMutex.RUnlock()
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 			w.Header().Add("Content-Type", "application/json")
 			enc := json.NewEncoder(w)
 			err := enc.Encode(tunnel)
@@ -233,14 +234,15 @@ func (s *Service) startApiService(ctx context.Context) error {
 			return
 		}
 
-		tunnel, ok := s.tunnels[string(udid)]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-
 		switch r.Method {
 		case http.MethodGet:
+			s.tunnelsMutex.RLock()
+			tunnel, ok := s.tunnels[string(udid)]
+			s.tunnelsMutex.RUnlock()
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 			w.Header().Add("Content-Type", "application/json")
 			enc := json.NewEncoder(w)
 			err := enc.Encode(tunnel.Services)
@@ -258,8 +260,8 @@ func (s *Service) startApiService(ctx context.Context) error {
 			writer.Header().Add("Content-Type", "application/json")
 			enc := json.NewEncoder(writer)
 
-			s.tunnelsMutex.Lock()
-			defer s.tunnelsMutex.Unlock()
+			s.tunnelsMutex.RLock()
+			defer s.tunnelsMutex.RUnlock()
 
 			tunnels := make([]tunnel.Tunnel, 0, len(s.tunnels))
 			for _, t := range s.tunnels {
@@ -343,55 +345,64 @@ func (s *Service) runAutoTunnel(ctx context.Context, ev rsd.RsdServiceEvent) {
 		case <-ctx.Done():
 			return
 		default:
-			if s.tunnelExists(ev.Info.Udid) {
-				// Tunnel already exists.
-				return
-			}
+		}
 
-			if !s.rsdExists(ev.Info.Udid) {
-				// RSD service no longer exists.
-				return
-			}
+		if s.tunnelExists(ev.Info.Udid) {
+			// Tunnel already exists.
+			return
+		}
 
-			// Ensure the device is running iOS 17 or greater
-			if !s.isIos17OrGreater(ev.Info) {
-				return
-			}
+		if !s.rsdExists(ev.Info.Udid) {
+			// RSD service no longer exists.
+			return
+		}
 
-			tunnel, err := s.createTunnel(ctx, ev.Info)
-			if err != nil {
-				time.Sleep(1 * time.Second)
+		// Ensure the device is running iOS 17 or greater
+		if !s.isIos17OrGreater(ev.Info) {
+			return
+		}
+
+		tunnel, err := s.createTunnel(ctx, ev.Info)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(1 * time.Second):
 				continue
 			}
+		}
 
-			// Wait until the tunnel has exited
-			<-tunnel.TunnelContext.Done()
+		// Wait until the tunnel has exited
+		<-tunnel.TunnelContext.Done()
 
-			log.WithFields(log.Fields{
-				"interface": ev.Info.InterfaceName,
-				"udid":      ev.Info.Udid,
-				"addr":      ev.Info.Address,
-			}).Info("Tunnel exited")
+		log.WithFields(log.Fields{
+			"interface": ev.Info.InterfaceName,
+			"udid":      ev.Info.Udid,
+			"addr":      ev.Info.Address,
+		}).Info("Tunnel exited")
 
-			s.removeTunnel(ev.Info)
+		s.removeTunnel(ev.Info)
 
-			if s.autoCreateTunnels {
-				if _, ok := s.rsdMap[ev.Info.Udid]; ok {
-					// Try to recreate the tunnel
-					time.Sleep(1 * time.Second)
+		if s.autoCreateTunnels {
+			if s.rsdExists(ev.Info.Udid) {
+				// Try to recreate the tunnel
+				log.WithFields(log.Fields{
+					"interface": ev.Info.InterfaceName,
+					"udid":      ev.Info.Udid,
+					"addr":      ev.Info.Address,
+				}).Info("Recreating tunnel")
 
-					log.WithFields(log.Fields{
-						"interface": ev.Info.InterfaceName,
-						"udid":      ev.Info.Udid,
-						"addr":      ev.Info.Address,
-					}).Info("Recreating tunnel")
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1 * time.Second):
 					continue
 				}
 			}
-
-			log.Debug("Interface is gone, not recreating tunnel for ", ev.Info.Udid)
-			return
 		}
+
+		log.Debug("Interface is gone, not recreating tunnel for ", ev.Info.Udid)
+		return
 	}
 }
 
@@ -411,6 +422,12 @@ func (s *Service) pairTunnel(udid string) {
 	ctx := context.Background()
 
 	for {
+		// Check if device is still connected before each attempt
+		if !s.rsdExists(udid) {
+			log.WithField("udid", udid).Debug("Device disconnected, stopping pairing attempts")
+			return
+		}
+
 		err := tunnel.ManualPair(ctx, s.pm, rsd.Address, rsd.Udid, s.tn)
 		if err == nil {
 			break
@@ -420,15 +437,17 @@ func (s *Service) pairTunnel(udid string) {
 			break
 		}
 
-		select {
-		case <-ctx.Done():
+		log.WithFields(log.Fields{
+			"udid": rsd.Udid,
+		}).Info("Re-attempting tunnel pairing")
+
+		// Check again before sleeping to avoid unnecessary delay
+		if !s.rsdExists(udid) {
+			log.WithField("udid", udid).Debug("Device disconnected, stopping pairing attempts")
 			return
-		case <-time.After(1 * time.Second):
-			log.WithFields(log.Fields{
-				"udid": rsd.Udid,
-			}).Info("Re-attempting tunnel pairing")
-			continue
 		}
+
+		time.Sleep(1 * time.Second)
 	}
 
 	log.WithFields(log.Fields{
@@ -529,8 +548,8 @@ func (s *Service) removeTunnel(info rsd.RsdService) {
 }
 
 func (s *Service) tunnelExists(udid string) bool {
-	s.tunnelsMutex.Lock()
-	defer s.tunnelsMutex.Unlock()
+	s.tunnelsMutex.RLock()
+	defer s.tunnelsMutex.RUnlock()
 	_, exists := s.tunnels[udid]
 	return exists
 }
@@ -592,8 +611,8 @@ func (s *Service) setTunnelStatus(udid string, status tunnel.TunnelStatus) {
 }
 
 func (s *Service) getRsd(udid string) (rsd.RsdService, bool) {
-	s.rsdMapMutex.Lock()
-	defer s.rsdMapMutex.Unlock()
+	s.rsdMapMutex.RLock()
+	defer s.rsdMapMutex.RUnlock()
 	r, ok := s.rsdMap[udid]
 	return r, ok
 }
@@ -605,8 +624,8 @@ func (s *Service) setRsd(rsd rsd.RsdService) {
 }
 
 func (s *Service) rsdExists(udid string) bool {
-	s.rsdMapMutex.Lock()
-	defer s.rsdMapMutex.Unlock()
+	s.rsdMapMutex.RLock()
+	defer s.rsdMapMutex.RUnlock()
 	_, exists := s.rsdMap[udid]
 	return exists
 }
@@ -620,11 +639,11 @@ func (s *Service) removeRsd(udid string) {
 func (s *Service) createPrometheusMetricsResponse(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
-	s.rsdMapMutex.Lock()
-	defer s.rsdMapMutex.Unlock()
+	s.rsdMapMutex.RLock()
+	defer s.rsdMapMutex.RUnlock()
 
-	s.tunnelsMutex.Lock()
-	defer s.tunnelsMutex.Unlock()
+	s.tunnelsMutex.RLock()
+	defer s.tunnelsMutex.RUnlock()
 
 	var sb strings.Builder
 
@@ -710,11 +729,11 @@ func (s *Service) createTunnelStatusResponse(w http.ResponseWriter, r *http.Requ
 	w.Header().Add("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 
-	s.rsdMapMutex.Lock()
-	defer s.rsdMapMutex.Unlock()
+	s.rsdMapMutex.RLock()
+	defer s.rsdMapMutex.RUnlock()
 
-	s.tunnelsMutex.Lock()
-	defer s.tunnelsMutex.Unlock()
+	s.tunnelsMutex.RLock()
+	defer s.tunnelsMutex.RUnlock()
 
 	status := struct {
 		AutoCreateTunnels bool               `json:"autoCreateTunnels"`
