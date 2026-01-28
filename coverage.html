@@ -1,0 +1,3476 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>runtime: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/dmdmdm-nz/tunneld/internal/runtime/subqueue.go (100.0%)</option>
+				
+				<option value="file1">github.com/dmdmdm-nz/tunneld/internal/runtime/subqueue_ext.go (0.0%)</option>
+				
+				<option value="file2">github.com/dmdmdm-nz/tunneld/internal/runtime/supervisor.go (100.0%)</option>
+				
+				<option value="file3">github.com/dmdmdm-nz/tunneld/internal/tunnel/codec.go (0.0%)</option>
+				
+				<option value="file4">github.com/dmdmdm-nz/tunneld/internal/tunnel/connect.go (0.0%)</option>
+				
+				<option value="file5">github.com/dmdmdm-nz/tunneld/internal/tunnel/opack/opack.go (85.7%)</option>
+				
+				<option value="file6">github.com/dmdmdm-nz/tunneld/internal/tunnel/pair-record.go (0.0%)</option>
+				
+				<option value="file7">github.com/dmdmdm-nz/tunneld/internal/tunnel/plistcodec.go (0.0%)</option>
+				
+				<option value="file8">github.com/dmdmdm-nz/tunneld/internal/tunnel/remoted.go (0.0%)</option>
+				
+				<option value="file9">github.com/dmdmdm-nz/tunneld/internal/tunnel/rsd.go (0.0%)</option>
+				
+				<option value="file10">github.com/dmdmdm-nz/tunneld/internal/tunnel/srp.go (0.0%)</option>
+				
+				<option value="file11">github.com/dmdmdm-nz/tunneld/internal/tunnel/tlv.go (93.1%)</option>
+				
+				<option value="file12">github.com/dmdmdm-nz/tunneld/internal/tunnel/tunnel-notifications.go (0.0%)</option>
+				
+				<option value="file13">github.com/dmdmdm-nz/tunneld/internal/tunnel/tunnel.go (0.0%)</option>
+				
+				<option value="file14">github.com/dmdmdm-nz/tunneld/internal/tunnel/types.go (100.0%)</option>
+				
+				<option value="file15">github.com/dmdmdm-nz/tunneld/internal/tunnel/untrusted.go (0.0%)</option>
+				
+				<option value="file16">github.com/dmdmdm-nz/tunneld/internal/tunnel/utils.go (0.0%)</option>
+				
+				<option value="file17">github.com/dmdmdm-nz/tunneld/internal/tunnel/xpc/encoding.go (71.2%)</option>
+				
+				<option value="file18">github.com/dmdmdm-nz/tunneld/internal/tunnel/xpc/xpc.go (0.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package runtime
+
+import (
+        "sync"
+)
+
+type SubQueue[T any] struct {
+        mu     sync.Mutex
+        cond   *sync.Cond
+        queue  []T
+        closed bool
+
+        outCh  chan T // consumer reads from this
+        paused bool   // gate dispatch until snapshot sent
+}
+
+func NewSubQueue[T any](outBuf int) *SubQueue[T] <span class="cov8" title="1">{
+        sq := &amp;SubQueue[T]{
+                outCh:  make(chan T, outBuf),
+                paused: true,
+        }
+        sq.cond = sync.NewCond(&amp;sq.mu)
+        go sq.dispatch()
+        return sq
+}</span>
+
+// Channel exposed to subscriber.
+func (sq *SubQueue[T]) Chan() &lt;-chan T <span class="cov8" title="1">{ return sq.outCh }</span>
+
+// Enqueue appends to the in-memory queue and wakes dispatcher.
+func (sq *SubQueue[T]) Enqueue(ev T) <span class="cov8" title="1">{
+        sq.mu.Lock()
+        if !sq.closed </span><span class="cov8" title="1">{
+                sq.queue = append(sq.queue, ev)
+                sq.cond.Signal()
+        }</span>
+        <span class="cov8" title="1">sq.mu.Unlock()</span>
+}
+
+// Pause/Resume gates dispatching (used to hold back live events during snapshot).
+func (sq *SubQueue[T]) SetPaused(v bool) <span class="cov8" title="1">{
+        sq.mu.Lock()
+        sq.paused = v
+        sq.cond.Broadcast()
+        sq.mu.Unlock()
+}</span>
+
+// Close stops the dispatcher and closes the out channel.
+func (sq *SubQueue[T]) Close() <span class="cov8" title="1">{
+        sq.mu.Lock()
+        sq.closed = true
+        sq.cond.Broadcast()
+        sq.mu.Unlock()
+}</span>
+
+func (sq *SubQueue[T]) dispatch() <span class="cov8" title="1">{
+        for </span><span class="cov8" title="1">{
+                sq.mu.Lock()
+                for !sq.closed &amp;&amp; (sq.paused || len(sq.queue) == 0) </span><span class="cov8" title="1">{
+                        sq.cond.Wait()
+                }</span>
+                <span class="cov8" title="1">if sq.closed </span><span class="cov8" title="1">{
+                        sq.mu.Unlock()
+                        close(sq.outCh)
+                        return
+                }</span>
+                <span class="cov8" title="1">ev := sq.queue[0]
+                // pop
+                copy(sq.queue, sq.queue[1:])
+                sq.queue = sq.queue[:len(sq.queue)-1]
+                sq.mu.Unlock()
+
+                // Send to subscriber (blocks only on the channel buffer / reader).
+                sq.outCh &lt;- ev</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package runtime
+
+// OutOfBandSnapshotSend pushes a message directly to the subscriber channel,
+// bypassing the queue. Use ONLY during snapshot emission while the sub is paused
+// and the channel was created with enough buffer to accommodate the snapshot burst.
+func (sq *SubQueue[T]) OutOfBandSnapshotSend(ev T) <span class="cov0" title="0">{
+        sq.outCh &lt;- ev
+}</span>
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package runtime
+
+import (
+        "context"
+        "sync"
+)
+
+type worker struct {
+        name   string
+        run    func(context.Context) error
+        closeF func() error
+}
+
+type Supervisor struct {
+        mu      sync.Mutex
+        workers []worker
+        wg      sync.WaitGroup
+        errOnce sync.Once
+        err     error
+}
+
+func NewSupervisor() *Supervisor <span class="cov8" title="1">{
+        return &amp;Supervisor{}
+}</span>
+
+func (s *Supervisor) Add(name string, run func(context.Context) error, closeF func() error) <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        s.workers = append(s.workers, worker{name: name, run: run, closeF: closeF})
+}</span>
+
+func (s *Supervisor) Start(ctx context.Context) error <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        for _, w := range s.workers </span><span class="cov8" title="1">{
+                w := w
+                s.wg.Add(1)
+                go func() </span><span class="cov8" title="1">{
+                        defer s.wg.Done()
+                        if err := w.run(ctx); err != nil </span><span class="cov8" title="1">{
+                                s.errOnce.Do(func() </span><span class="cov8" title="1">{ s.err = err }</span>)
+                        }
+                }()
+        }
+        <span class="cov8" title="1">return nil</span>
+}
+
+func (s *Supervisor) Wait(ctx context.Context) error <span class="cov8" title="1">{
+        &lt;-ctx.Done() // wait for signal
+        // Close in reverse order.
+        for i := len(s.workers) - 1; i &gt;= 0; i-- </span><span class="cov8" title="1">{
+                if s.workers[i].closeF != nil </span><span class="cov8" title="1">{
+                        _ = s.workers[i].closeF()
+                }</span>
+        }
+        <span class="cov8" title="1">s.wg.Wait()
+        return s.err</span>
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package tunnel
+
+import (
+        "crypto/cipher"
+        "encoding/binary"
+        "encoding/json"
+        "fmt"
+)
+
+type eventCodec interface {
+        Encode() map[string]interface{}
+        Decode(e map[string]interface{}) error
+}
+
+type pairingData struct {
+        data            []byte
+        kind            string
+        sendingHost     string
+        startNewSession bool
+}
+
+func (p *pairingData) Encode() map[string]interface{} <span class="cov0" title="0">{
+        return map[string]interface{}{
+                "pairingData": map[string]interface{}{
+                        "_0": map[string]interface{}{
+                                "data":            p.data,
+                                "kind":            p.kind,
+                                "sendingHost":     p.sendingHost,
+                                "startNewSession": p.startNewSession,
+                        },
+                },
+        }
+}</span>
+
+func (p *pairingData) Decode(e map[string]interface{}) error <span class="cov0" title="0">{
+        pd, err := getChildMap(e, "pairingData", "_0")
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">if data, ok := pd["data"].([]byte); ok </span><span class="cov0" title="0">{
+                p.data = data
+        }</span>
+        <span class="cov0" title="0">if kind, ok := pd["kind"].(string); ok </span><span class="cov0" title="0">{
+                p.kind = kind
+        }</span>
+        <span class="cov0" title="0">if startNewSession, ok := pd["startNewSession"].(bool); ok </span><span class="cov0" title="0">{
+                p.startNewSession = startNewSession
+        }</span>
+        <span class="cov0" title="0">if sendingHost, ok := pd["sendingHost"].(string); ok </span><span class="cov0" title="0">{
+                p.sendingHost = sendingHost
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+
+type pairVerifyFailed struct {
+}
+
+func (p pairVerifyFailed) Encode() map[string]interface{} <span class="cov0" title="0">{
+        return map[string]interface{}{
+                "pairVerifyFailed": map[string]interface{}{},
+        }
+}</span>
+
+func (p pairVerifyFailed) Decode(_ map[string]interface{}) error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+func getChildMap(m map[string]interface{}, keys ...string) (map[string]interface{}, error) <span class="cov0" title="0">{
+        if len(keys) == 0 </span><span class="cov0" title="0">{
+                return m, nil
+        }</span>
+        <span class="cov0" title="0">k := keys[0]
+        if c, ok := m[k].(map[string]interface{}); ok </span><span class="cov0" title="0">{
+                return getChildMap(c, keys[1:]...)
+        }</span>
+        <span class="cov0" title="0">return nil, fmt.Errorf("getChildMap: could not find entry for '%s'", k)</span>
+}
+
+type xpcConn interface {
+        Send(data map[string]interface{}, flags ...uint32) error
+        ReceiveOnClientServerStream() (map[string]interface{}, error)
+}
+
+// controlChannelReadWriter encodes messages into the 'RemotePairing.ControlChannelMessageEnvelope'
+// format for RemoteXPC connections
+// There are three types of payload put into this envelope
+//  1. Requests
+//     the only request used here is to initiate a handshake
+//  2. Events
+//     they are sent in both directions using the same format. In most cases events also carry another payload
+//     that is encoded using a type-length-value (TLV) format
+//  3. Encrypted Streams
+//     these messages contain an encrypted payload using an AEAD format.
+//     They are implemented in a separate type cipherStream here.
+type controlChannelReadWriter struct {
+        seqNr uint64
+        conn  xpcConn
+}
+
+func newControlChannelReadWriter(conn xpcConn) *controlChannelReadWriter <span class="cov0" title="0">{
+        return &amp;controlChannelReadWriter{
+                seqNr: 1,
+                conn:  conn,
+        }
+}</span>
+
+// writeEvent wraps an event into a 'RemotePairing.ControlChannelMessageEnvelope' and transfers it on the RemoteXPC
+// connection
+func (c *controlChannelReadWriter) writeEvent(e eventCodec) error <span class="cov0" title="0">{
+        encoded := map[string]interface{}{
+                "plain": map[string]interface{}{
+                        "_0": map[string]interface{}{
+                                "event": map[string]interface{}{
+                                        "_0": e.Encode(),
+                                },
+                        },
+                },
+        }
+        return c.write(encoded)
+}</span>
+
+// readEvent unwraps an event from a 'RemotePairing.ControlChannelMessageEnvelope'
+func (c *controlChannelReadWriter) readEvent(e eventCodec) error <span class="cov0" title="0">{
+        m, err := c.read()
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("readEvent: failed to read message: %w", err)
+        }</span>
+        <span class="cov0" title="0">event, err := getChildMap(m, "plain", "_0", "event", "_0")
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("readEvent: failed to get event payload: %w", err)
+        }</span>
+        <span class="cov0" title="0">return e.Decode(event)</span>
+}
+
+func (c *controlChannelReadWriter) writeRequest(req map[string]interface{}) error <span class="cov0" title="0">{
+        err := c.write(map[string]interface{}{
+                "plain": map[string]interface{}{
+                        "_0": map[string]interface{}{
+                                "request": map[string]interface{}{
+                                        "_0": req,
+                                },
+                        },
+                },
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("writeRequest: failed to write message: %w", err)
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+
+func (c *controlChannelReadWriter) write(message map[string]interface{}) error <span class="cov0" title="0">{
+        e := map[string]interface{}{
+                "mangledTypeName": "RemotePairing.ControlChannelMessageEnvelope",
+                "value": map[string]interface{}{
+                        "message":        message,
+                        "originatedBy":   "host",
+                        "sequenceNumber": c.seqNr,
+                },
+        }
+        c.seqNr += 1
+        err := c.conn.Send(e)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("write: failed to send message: %w", err)
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+
+func (c *controlChannelReadWriter) read() (map[string]interface{}, error) <span class="cov0" title="0">{
+        p, err := c.conn.ReceiveOnClientServerStream()
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov0" title="0">value, err := getChildMap(p, "value")
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">return getChildMap(value, "message")</span>
+}
+
+// cipherStream encrypts and decrypts payloads embedded into 'RemotePairing.ControlChannelMessageEnvelope' messages
+// It uses an authenticated encryption with associated (AEAD) format where the nonce is a counter starting
+// at zero for the first message. There is always a message from the host to the device, and one from the device to
+// the host. This message pair uses the same nonce before that counter is increased for the next message from the host
+// to the device
+type cipherStream struct {
+        controlChannel *controlChannelReadWriter
+        clientCipher   cipher.AEAD
+        serverCipher   cipher.AEAD
+        nonce          []byte
+        sequence       uint64
+}
+
+func newCipherStream(controlChannel *controlChannelReadWriter, clientCipher, serverCipher cipher.AEAD) *cipherStream <span class="cov0" title="0">{
+        return &amp;cipherStream{
+                controlChannel: controlChannel,
+                clientCipher:   clientCipher,
+                serverCipher:   serverCipher,
+                nonce:          make([]byte, clientCipher.NonceSize()),
+                sequence:       0,
+        }
+}</span>
+
+func (c *cipherStream) write(p map[string]interface{}) error <span class="cov0" title="0">{
+        c.updateNonce()
+        marshalled, err := json.Marshal(p)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">encrypted := c.clientCipher.Seal(nil, c.nonce, marshalled, nil)
+        c.sequence += 1
+        return c.controlChannel.write(map[string]interface{}{
+                "streamEncrypted": map[string]interface{}{
+                        "_0": encrypted,
+                },
+        })</span>
+}
+
+func (c *cipherStream) read(p *map[string]interface{}) error <span class="cov0" title="0">{
+        m, err := c.controlChannel.read()
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">if streamEncr, err := getChildMap(m, "streamEncrypted"); err == nil </span><span class="cov0" title="0">{
+                if cip, ok := streamEncr["_0"].([]byte); ok </span><span class="cov0" title="0">{
+                        plain, err := c.serverCipher.Open(nil, c.nonce, cip, nil)
+                        if err != nil </span><span class="cov0" title="0">{
+                                return err
+                        }</span>
+                        <span class="cov0" title="0">return json.Unmarshal(plain, p)</span>
+                }
+        }
+        <span class="cov0" title="0">return fmt.Errorf("not implemented")</span>
+}
+
+func (c *cipherStream) updateNonce() <span class="cov0" title="0">{
+        b := binary.LittleEndian.AppendUint64(nil, c.sequence)
+        copy(c.nonce[0:8], b)
+}</span>
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package tunnel
+
+import (
+        "fmt"
+        "net"
+        "time"
+
+        "github.com/dmdmdm-nz/tunneld/internal/tunnel/http"
+        "github.com/dmdmdm-nz/tunneld/internal/tunnel/xpc"
+)
+
+func CreateXpcConnection(h *http.HttpConnection) (*xpc.Connection, error) <span class="cov0" title="0">{
+        err := initializeXpcConnection(h)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("CreateXpcConnection: failed to initialize xpc connection: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">clientServerChannel := http.NewStreamReadWriter(h, http.ClientServer)
+        serverClientChannel := http.NewStreamReadWriter(h, http.ServerClient)
+
+        xpcConn, err := xpc.New(clientServerChannel, serverClientChannel, h)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("CreateXpcConnection: failed to create xpc connection: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return xpcConn, nil</span>
+}
+
+func initializeXpcConnection(h *http.HttpConnection) error <span class="cov0" title="0">{
+        csWriter := http.NewStreamReadWriter(h, http.ClientServer)
+        ssWriter := http.NewStreamReadWriter(h, http.ServerClient)
+
+        err := xpc.EncodeMessage(csWriter, xpc.Message{
+                Flags: xpc.AlwaysSetFlag,
+                Body:  map[string]interface{}{},
+                Id:    0,
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("initializeXpcConnection: failed to encode message: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">_, err = xpc.DecodeMessage(csWriter) // TODO : figure out if need to act on this frame
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("initializeXpcConnection: failed to decode message: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">err = xpc.EncodeMessage(ssWriter, xpc.Message{
+                Flags: xpc.InitHandshakeFlag | xpc.AlwaysSetFlag,
+                Body:  nil,
+                Id:    0,
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("initializeXpcConnection: failed to encode message 2: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">_, err = xpc.DecodeMessage(ssWriter) // TODO : figure out if need to act on this frame
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("initializeXpcConnection: failed to decode message 2: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">err = xpc.EncodeMessage(csWriter, xpc.Message{
+                Flags: 0x201, // alwaysSetFlag | 0x200
+                Body:  nil,
+                Id:    0,
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("initializeXpcConnection: failed to encode message 3: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">_, err = xpc.DecodeMessage(csWriter) // TODO : figure out if need to act on this frame
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("initializeXpcConnection: failed to decode message 3: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+// connect to a operating system level TUN device
+func ConnectTUN(address string, port int) (*net.TCPConn, error) <span class="cov0" title="0">{
+        addr, err := net.ResolveTCPAddr("tcp6", fmt.Sprintf("[%s]:%d", address, port))
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("ConnectToHttp2WithAddr: failed to resolve address: %w", err)
+        }</span>
+        <span class="cov0" title="0">conn, err := net.DialTCP("tcp", nil, addr)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("ConnectToHttp2WithAddr: failed to dial: %w", err)
+        }</span>
+        <span class="cov0" title="0">err = conn.SetKeepAlive(true)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("ConnectUserSpaceTunnel: failed to set keepalive: %w", err)
+        }</span>
+        <span class="cov0" title="0">err = conn.SetKeepAlivePeriod(1 * time.Second)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("ConnectUserSpaceTunnel: failed to set keepalive period: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return conn, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">package opack
+
+import (
+        "bytes"
+        "fmt"
+        "io"
+)
+
+func Encode(m map[string]interface{}) ([]byte, error) <span class="cov8" title="1">{
+        buf := bytes.NewBuffer(nil)
+        err := encodeDict(buf, m)
+        if err != nil </span><span class="cov8" title="1">{
+                return nil, err
+        }</span>
+        <span class="cov8" title="1">return buf.Bytes(), nil</span>
+}
+
+func encodeDict(w io.Writer, d map[string]interface{}) error <span class="cov8" title="1">{
+        l := len(d)
+        if l &gt; 0xF </span><span class="cov8" title="1">{
+                return fmt.Errorf("%d exceeds max size of 0xF", l)
+        }</span>
+        <span class="cov8" title="1">b := 0xE0 | uint8(l)
+        _, err := w.Write([]byte{b})
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov8" title="1">for k, e := range d </span><span class="cov8" title="1">{
+                err := encodeString(w, k)
+                if err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">switch t := e.(type) </span>{
+                case string:<span class="cov8" title="1">
+                        err := encodeString(w, e.(string))
+                        if err != nil </span><span class="cov0" title="0">{
+                                return err
+                        }</span>
+                case []byte:<span class="cov8" title="1">
+                        err := encodeData(w, e.([]byte))
+                        if err != nil </span><span class="cov0" title="0">{
+                                return err
+                        }</span>
+                default:<span class="cov8" title="1">
+                        return fmt.Errorf("can't encode type %s", t)</span>
+                }
+        }
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeString(w io.Writer, s string) error <span class="cov8" title="1">{
+        err := writeLengthBasedIdentifier(w, 0x40, len(s))
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov8" title="1">_, err = w.Write([]byte(s))
+        return err</span>
+}
+
+func encodeData(w io.Writer, b []byte) error <span class="cov8" title="1">{
+        err := writeLengthBasedIdentifier(w, 0x70, len(b))
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov8" title="1">_, err = w.Write(b)
+        return err</span>
+}
+
+func createIdentifierWithLength(t byte, l int) ([]byte, error) <span class="cov8" title="1">{
+        if l &lt;= 0xF </span><span class="cov8" title="1">{
+                return []byte{t | byte(l)}, nil
+        }</span> else<span class="cov8" title="1"> if l &lt; 0x20 </span><span class="cov8" title="1">{
+                inc := t + (1 &lt;&lt; 4)
+                return []byte{inc | (byte(l) &amp; 0xF)}, nil
+        }</span> else<span class="cov8" title="1"> if l &lt;= 0xFF </span><span class="cov8" title="1">{
+                inc := (t + (2 &lt;&lt; 4)) | 0x1
+                return []byte{inc, byte(l)}, nil
+        }</span> else<span class="cov8" title="1"> {
+                return nil, fmt.Errorf("string too long: %d", l)
+        }</span>
+}
+
+func writeLengthBasedIdentifier(w io.Writer, t byte, l int) error <span class="cov8" title="1">{
+        id, err := createIdentifierWithLength(t, l)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov8" title="1">_, err = w.Write(id)
+        return err</span>
+}
+</pre>
+		
+		<pre class="file" id="file6" style="display: none">package tunnel
+
+import (
+        "crypto/rand"
+        "errors"
+        "fmt"
+        "os"
+        "path"
+        "strings"
+
+        "github.com/google/uuid"
+        "golang.org/x/crypto/ed25519"
+        "howett.net/plist"
+)
+
+type selfIdentity struct {
+        Identifier string `plist:"identifier"`
+        Irk        []byte `plist:"irk"`
+        PrivateKey []byte `plist:"privateKey"`
+        PublicKey  []byte `plist:"publicKey"`
+}
+
+func (s selfIdentity) publicKey() ed25519.PublicKey <span class="cov0" title="0">{
+        return s.PublicKey
+}</span>
+
+func (s selfIdentity) privateKey() ed25519.PrivateKey <span class="cov0" title="0">{
+        return ed25519.NewKeyFromSeed(s.PrivateKey)
+}</span>
+
+// PairRecordManager implements the same logic as macOS related to remote pair records. Those pair records are used
+// whenever a tunnel gets created.
+type PairRecordManager struct {
+        selfId        selfIdentity
+        peersLocation string
+}
+
+// NewPairRecordManager creates a PairRecordManager that reads/stores the pair records information at the given path
+// To use the same pair records as macOS does, this path should be /var/db/lockdown/RemotePairing/user_501
+// (user_501 is the default for the root user)
+func NewPairRecordManager(p string) (PairRecordManager, error) <span class="cov0" title="0">{
+        selfIdPath := path.Join(p, "selfIdentity.plist")
+        selfId, err := getOrCreateSelfIdentity(selfIdPath)
+        if err != nil </span><span class="cov0" title="0">{
+                return PairRecordManager{}, fmt.Errorf("NewPairRecordManager: failed to get self identity: %w", err)
+        }</span>
+        <span class="cov0" title="0">return PairRecordManager{
+                selfId:        selfId,
+                peersLocation: path.Join(p, "peers"),
+        }, nil</span>
+}
+
+func readSelfIdentity(p string) (selfIdentity, error) <span class="cov0" title="0">{
+        content, err := os.ReadFile(p)
+        if err != nil </span><span class="cov0" title="0">{
+                return selfIdentity{}, fmt.Errorf("readSelfIdentity: could not read file: %w", err)
+        }</span>
+        <span class="cov0" title="0">var s selfIdentity
+        _, err = plist.Unmarshal(content, &amp;s)
+        if err != nil </span><span class="cov0" title="0">{
+                return selfIdentity{}, fmt.Errorf("readSelfIdentity: could not parse plist content: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return s, nil</span>
+}
+
+func getOrCreateSelfIdentity(p string) (selfIdentity, error) <span class="cov0" title="0">{
+        info, err := os.Stat(p)
+        if err != nil </span><span class="cov0" title="0">{
+                if errors.Is(err, os.ErrNotExist) </span><span class="cov0" title="0">{
+                        return createSelfIdentity(p)
+                }</span> else<span class="cov0" title="0"> {
+                        return selfIdentity{}, fmt.Errorf("getOrCreateSelfIdentity: failed to get file info: %w", err)
+                }</span>
+        }
+        <span class="cov0" title="0">if info.IsDir() </span><span class="cov0" title="0">{
+                return selfIdentity{}, fmt.Errorf("getOrCreateSelfIdentity: '%s' is a directory", p)
+        }</span>
+        <span class="cov0" title="0">return readSelfIdentity(p)</span>
+}
+
+func createSelfIdentity(p string) (selfIdentity, error) <span class="cov0" title="0">{
+        irk := make([]byte, 16)
+        _, _ = rand.Read(irk)
+
+        pub, priv, err := ed25519.GenerateKey(rand.Reader)
+        if err != nil </span><span class="cov0" title="0">{
+                return selfIdentity{}, fmt.Errorf("createSelfIdentity: failed to create key pair: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">si := selfIdentity{
+                Identifier: strings.ToUpper(uuid.New().String()),
+                Irk:        irk,
+                PrivateKey: priv.Seed(),
+                PublicKey:  pub,
+        }
+
+        f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o644)
+        if err != nil </span><span class="cov0" title="0">{
+                return selfIdentity{}, fmt.Errorf("createSelfIdentity: failed to open file for writing: %w", err)
+        }</span>
+        <span class="cov0" title="0">defer f.Close()
+
+        enc := plist.NewEncoderForFormat(f, plist.BinaryFormat)
+        err = enc.Encode(si)
+        if err != nil </span><span class="cov0" title="0">{
+                return selfIdentity{}, fmt.Errorf("createSelfIdentity: failed to encode self identity as plist: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return si, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file7" style="display: none">package tunnel
+
+import (
+        "bytes"
+        "encoding/binary"
+        "errors"
+        "fmt"
+        "io"
+        "reflect"
+
+        "howett.net/plist"
+
+        log "github.com/sirupsen/logrus"
+)
+
+// PlistCodec is a codec for PLIST based services with [4 byte big endian length][plist-payload] based messages
+type PlistCodec struct{}
+
+// NewPlistCodec create a codec for PLIST based services with [4 byte big endian length][plist-payload] based messages
+func NewPlistCodec() PlistCodec <span class="cov0" title="0">{
+        return PlistCodec{}
+}</span>
+
+// Encode encodes a LockDown Struct to a byte[] with the lockdown plist format.
+// It returns a byte array that contains a 4 byte length unsigned big endian integer
+// followed by the plist as a string
+func (plistCodec PlistCodec) Encode(message interface{}) ([]byte, error) <span class="cov0" title="0">{
+        stringContent := ToPlist(message)
+        log.Tracef("Lockdown send %v", reflect.TypeOf(message))
+        buf := new(bytes.Buffer)
+        length := len(stringContent)
+        messageLength := uint32(length)
+
+        err := binary.Write(buf, binary.BigEndian, messageLength)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov0" title="0">buf.Write([]byte(stringContent))
+        return buf.Bytes(), nil</span>
+}
+
+// Decode reads a Lockdown Message from the provided reader and
+// sends it to the ResponseChannel
+func (plistCodec PlistCodec) Decode(r io.Reader) ([]byte, error) <span class="cov0" title="0">{
+        if r == nil </span><span class="cov0" title="0">{
+                return nil, errors.New("reader was nil")
+        }</span>
+        <span class="cov0" title="0">buf := make([]byte, 4)
+        err := binary.Read(r, binary.BigEndian, buf)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov0" title="0">length := binary.BigEndian.Uint32(buf)
+        payloadBytes := make([]byte, length)
+        n, err := io.ReadFull(r, payloadBytes)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("lockdown Payload had incorrect size: %d expected: %d original error: %s", n, length, err)
+        }</span>
+        <span class="cov0" title="0">return payloadBytes, nil</span>
+}
+
+// PlistCodecReadWriter handles length encoded plist messages
+// Each message starts with an uint32 value representing the length of the encoded payload
+// followed by the binary encoded plist data
+type PlistCodecReadWriter struct {
+        w io.Writer
+        r io.Reader
+}
+
+// NewPlistCodecReadWriter creates a new PlistCodecReadWriter
+func NewPlistCodecReadWriter(r io.Reader, w io.Writer) PlistCodecReadWriter <span class="cov0" title="0">{
+        return PlistCodecReadWriter{
+                w: w,
+                r: r,
+        }
+}</span>
+
+// Write encodes the passed value m into a binary plist and writes the length of
+// this encoded data followed by the actual data.
+func (p PlistCodecReadWriter) Write(m interface{}) error <span class="cov0" title="0">{
+        stringContent := ToPlist(m)
+        log.Tracef("Lockdown send %v", reflect.TypeOf(m))
+        buf := new(bytes.Buffer)
+        length := len(stringContent)
+        messageLength := uint32(length)
+
+        err := binary.Write(buf, binary.BigEndian, messageLength)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("Write: failed to write message length: %w", err)
+        }</span>
+        <span class="cov0" title="0">buf.Write([]byte(stringContent))
+        n, err := p.w.Write(buf.Bytes())
+        if n != buf.Len() </span><span class="cov0" title="0">{
+                return fmt.Errorf("Write: only %d bytes were written instead of %d", n, buf.Len())
+        }</span>
+        <span class="cov0" title="0">return err</span>
+}
+
+// Read reads and decodes a length encoded plist message from the reader of PlistCodecReadWriter
+func (p PlistCodecReadWriter) Read(v interface{}) error <span class="cov0" title="0">{
+        buf := make([]byte, 4)
+        err := binary.Read(p.r, binary.BigEndian, buf)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("Read: failed to read message length: %w", err)
+        }</span>
+        <span class="cov0" title="0">length := binary.BigEndian.Uint32(buf)
+        payloadBytes := make([]byte, length)
+        n, err := io.ReadFull(p.r, payloadBytes)
+        if uint32(n) != length </span><span class="cov0" title="0">{
+                return fmt.Errorf("Read: wrong payload length. %d bytes were read instead of %d", n, length)
+        }</span>
+        <span class="cov0" title="0">if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("Read: reading the payload data failed: %w", err)
+        }</span>
+        <span class="cov0" title="0">_, err = plist.Unmarshal(payloadBytes, v)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("Read: failed to decode plist: %w", err)
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package tunnel
+
+import (
+        "fmt"
+        "os/exec"
+        "runtime"
+        "sync"
+
+        log "github.com/sirupsen/logrus"
+)
+
+type RemotedService struct {
+        mu           sync.Mutex
+        cond         *sync.Cond
+        suspendCount int
+        isSuspended  bool
+        suspending   bool // true while suspend exec.Command is in progress
+        resuming     bool // true while resume exec.Command is in progress
+}
+
+var (
+        instance *RemotedService
+        once     sync.Once
+)
+
+func SuspendRemoted() (func(), error) <span class="cov0" title="0">{
+        once.Do(func() </span><span class="cov0" title="0">{
+                instance = &amp;RemotedService{}
+                instance.cond = sync.NewCond(&amp;instance.mu)
+        }</span>)
+
+        <span class="cov0" title="0">return instance.suspendRemoted()</span>
+}
+
+// ForceResumeRemoted ensures remoted is resumed regardless of suspend count.
+// This should be called during application shutdown to ensure remoted is not left suspended.
+func ForceResumeRemoted() error <span class="cov0" title="0">{
+        if instance == nil </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+        <span class="cov0" title="0">return instance.forceResume()</span>
+}
+
+func (r *RemotedService) forceResume() error <span class="cov0" title="0">{
+        r.mu.Lock()
+
+        // Wait if someone else is currently suspending or resuming
+        for r.suspending || r.resuming </span><span class="cov0" title="0">{
+                r.cond.Wait()
+        }</span>
+
+        <span class="cov0" title="0">if !r.isSuspended </span><span class="cov0" title="0">{
+                r.mu.Unlock()
+                return nil
+        }</span>
+
+        // We need to resume - mark that we're resuming and release the mutex
+        <span class="cov0" title="0">r.resuming = true
+        r.mu.Unlock()
+
+        // Perform the actual resume action without holding the mutex
+        err := signalRemotedResume()
+
+        r.mu.Lock()
+        r.resuming = false
+        if err != nil </span><span class="cov0" title="0">{
+                r.cond.Broadcast()
+                r.mu.Unlock()
+                return err
+        }</span>
+
+        <span class="cov0" title="0">r.isSuspended = false
+        r.suspendCount = 0
+        r.cond.Broadcast()
+        r.mu.Unlock()
+
+        return nil</span>
+}
+
+// suspendRemoted suspends the remoted service by sending a SIGSTOP signal.
+// It returns a function that, when called, will resume the remoted service.
+func (r *RemotedService) suspendRemoted() (func(), error) <span class="cov0" title="0">{
+        if runtime.GOOS != "darwin" </span><span class="cov0" title="0">{
+                return func() </span>{<span class="cov0" title="0">}</span>, nil // Only suspend on macOS
+        }
+
+        <span class="cov0" title="0">r.mu.Lock()
+
+        // Wait if someone else is currently suspending or resuming
+        for r.suspending || r.resuming </span><span class="cov0" title="0">{
+                r.cond.Wait()
+        }</span>
+
+        // If already suspended, just increment count and return
+        <span class="cov0" title="0">if r.isSuspended </span><span class="cov0" title="0">{
+                r.suspendCount++
+                log.Trace("Remoted service is already suspended; current count:", r.suspendCount)
+                r.mu.Unlock()
+                return r.createResumeFunc(), nil
+        }</span>
+
+        // We need to suspend - mark that we're suspending and release the mutex
+        <span class="cov0" title="0">r.suspending = true
+        r.mu.Unlock()
+
+        // Perform the actual suspend action without holding the mutex
+        err := signalRemotedSuspend()
+
+        r.mu.Lock()
+        r.suspending = false
+        if err != nil </span><span class="cov0" title="0">{
+                r.cond.Broadcast() // Wake up any waiters so they can try
+                r.mu.Unlock()
+                return nil, fmt.Errorf("failed to suspend remoted: %v", err)
+        }</span>
+
+        <span class="cov0" title="0">r.isSuspended = true
+        r.suspendCount++
+        r.cond.Broadcast() // Wake up any waiters
+        r.mu.Unlock()
+
+        return r.createResumeFunc(), nil</span>
+}
+
+// createResumeFunc returns a function that decrements the suspend count
+// and resumes remoted when the count reaches zero.
+func (r *RemotedService) createResumeFunc() func() <span class="cov0" title="0">{
+        return func() </span><span class="cov0" title="0">{
+                r.mu.Lock()
+
+                // Wait if someone else is currently suspending or resuming
+                for r.suspending || r.resuming </span><span class="cov0" title="0">{
+                        r.cond.Wait()
+                }</span>
+
+                <span class="cov0" title="0">if r.suspendCount &gt; 0 </span><span class="cov0" title="0">{
+                        r.suspendCount--
+                        log.Trace("Decremented suspend count; current count:", r.suspendCount)
+                }</span>
+
+                <span class="cov0" title="0">if r.suspendCount == 0 &amp;&amp; r.isSuspended </span><span class="cov0" title="0">{
+                        // We need to resume - mark that we're resuming and release the mutex
+                        r.resuming = true
+                        r.mu.Unlock()
+
+                        // Perform the actual resume action without holding the mutex
+                        err := signalRemotedResume()
+
+                        r.mu.Lock()
+                        r.resuming = false
+                        if err == nil </span><span class="cov0" title="0">{
+                                r.isSuspended = false
+                        }</span>
+                        <span class="cov0" title="0">r.cond.Broadcast() // Wake up any waiters
+                        r.mu.Unlock()
+                        return</span>
+                }
+
+                <span class="cov0" title="0">r.mu.Unlock()</span>
+        }
+}
+
+// SuspendRemoted sends a SIGSTOP signal to all processes named "remoted"
+// This suspends the process until a SIGCONT signal is received.
+func signalRemotedSuspend() error <span class="cov0" title="0">{
+        // Execute "killall -STOP remoted"
+        cmd := exec.Command("sudo", "killall", "-STOP", "remoted")
+        out, err := cmd.CombinedOutput()
+        if err != nil </span><span class="cov0" title="0">{
+                log.Errorf("failed to suspend remoted: %v, output: %s", err, out)
+                return fmt.Errorf("failed to suspend remoted: %v, output: %s", err, out)
+        }</span>
+
+        <span class="cov0" title="0">log.Debug("Suspended remoted service")
+        return nil</span>
+}
+
+// ResumeRemoted sends a SIGCONT signal to all processes named "remoted"
+// This resumes the process that was suspended using SIGSTOP.
+func signalRemotedResume() error <span class="cov0" title="0">{
+        // Execute "killall -CONT remoted"
+        cmd := exec.Command("sudo", "killall", "-CONT", "remoted")
+        out, err := cmd.CombinedOutput()
+        if err != nil </span><span class="cov0" title="0">{
+                log.Errorf("failed to resume remoted: %v, output: %s", err, out)
+                return fmt.Errorf("failed to resume remoted: %v, output: %s", err, out)
+        }</span>
+
+        <span class="cov0" title="0">log.Debug("Resumed remoted service")
+        return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file9" style="display: none">package tunnel
+
+import (
+        "encoding/json"
+        "fmt"
+        "io"
+        "net"
+        "strconv"
+
+        "github.com/dmdmdm-nz/tunneld/internal/tunnel/http"
+        "github.com/dmdmdm-nz/tunneld/internal/tunnel/xpc"
+        log "github.com/sirupsen/logrus"
+)
+
+// RsdPortProvider is an interface to get a port for a service, or a service for a port from the Remote Service Discovery on the device.
+type RsdPortProvider interface {
+        GetPort(service string) int
+        GetService(p int) string
+        GetServices() map[string]RsdServiceEntry
+}
+
+type RsdPortProviderJson map[string]service
+
+type service struct {
+        Port string
+}
+
+func NewRsdPortProvider(input io.Reader) (RsdPortProviderJson, error) <span class="cov0" title="0">{
+        decoder := json.NewDecoder(input)
+        parse := struct {
+                Services map[string]service
+        }{}
+
+        err := decoder.Decode(&amp;parse)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("NewRsdPortProvider: failed to parse rsd response: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return parse.Services, nil</span>
+}
+
+func (r RsdPortProviderJson) GetPort(service string) int <span class="cov0" title="0">{
+        p := r[service].Port
+        if p == "" </span><span class="cov0" title="0">{
+                shim := fmt.Sprintf("%s.shim.remote", service)
+                if r[shim].Port != "" </span><span class="cov0" title="0">{
+                        log.Debugf("returning port of '%s'-shim", service)
+                        return r.GetPort(shim)
+                }</span>
+        }
+        <span class="cov0" title="0">port, err := strconv.ParseInt(p, 10, 64)
+        if err != nil </span><span class="cov0" title="0">{
+                return 0
+        }</span>
+        <span class="cov0" title="0">return int(port)</span>
+}
+
+func (r RsdPortProviderJson) GetService(p int) string <span class="cov0" title="0">{
+        for name, s := range r </span><span class="cov0" title="0">{
+                port, err := strconv.ParseInt(s.Port, 10, 64)
+                if err != nil </span><span class="cov0" title="0">{
+                        log.Errorf("GetService: failed to parse port: %v", err)
+                        return ""
+                }</span>
+                <span class="cov0" title="0">if port == int64(p) </span><span class="cov0" title="0">{
+                        return name
+                }</span>
+        }
+        <span class="cov0" title="0">return ""</span>
+}
+
+func (r RsdPortProviderJson) GetServices() (services map[string]RsdServiceEntry) <span class="cov0" title="0">{
+        services = make(map[string]RsdServiceEntry, len(r))
+        for name, s := range r </span><span class="cov0" title="0">{
+                port, err := strconv.ParseInt(s.Port, 10, 64)
+                if err != nil </span><span class="cov0" title="0">{
+                        log.Errorf("GetService: failed to parse port: %v", err)
+                        continue</span>
+                }
+
+                <span class="cov0" title="0">services[name] = RsdServiceEntry{Port: uint32(port)}</span>
+        }
+
+        <span class="cov0" title="0">return</span>
+}
+
+// RsdCheckin sends a plist encoded message with the request 'RSDCheckin' to the device.
+// The device is expected to reply with two plist encoded messages. The first message is the response for the
+// checkin itself, and the second message contains a 'StartService' request, which does not need any action
+// from the host side
+func RsdCheckin(rw io.ReadWriter) error <span class="cov0" title="0">{
+        req := map[string]interface{}{
+                "Label":           "go-ios",
+                "ProtocolVersion": "2",
+                "Request":         "RSDCheckin",
+        }
+
+        prw := NewPlistCodecReadWriter(rw, rw)
+
+        err := prw.Write(req)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("RsdCheckin: failed to send checkin request: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">var checkinResponse map[string]any
+        err = prw.Read(&amp;checkinResponse)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("RsdCheckin: failed to read checkin response: %w", err)
+        }</span>
+        <span class="cov0" title="0">var startService map[string]any
+        err = prw.Read(&amp;startService)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("RsdCheckin: failed to read start service message: %w", err)
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+
+const RSD_PORT = 58783
+
+type RsdService struct {
+        xpc *xpc.Connection
+        c   io.Closer
+}
+
+func (s RsdService) Close() error <span class="cov0" title="0">{
+        return s.c.Close()
+}</span>
+
+type RsdServiceEntry struct {
+        Port uint32
+}
+
+// RsdHandshakeResponse is the response to the RSDCheckin request and contains the UDID
+// and the services available on the device.
+type RsdHandshakeResponse struct {
+        Udid           string
+        ProductVersion string
+        Services       map[string]RsdServiceEntry
+}
+
+// GetService returns the service name for the given port.
+func (r RsdHandshakeResponse) GetService(p int) string <span class="cov0" title="0">{
+        for name, s := range r.Services </span><span class="cov0" title="0">{
+                if s.Port == uint32(p) </span><span class="cov0" title="0">{
+                        return name
+                }</span>
+        }
+        <span class="cov0" title="0">return ""</span>
+}
+
+// GetPort returns the port for the given service.
+func (r RsdHandshakeResponse) GetPort(service string) int <span class="cov0" title="0">{
+        if s, ok := r.Services[service]; ok </span><span class="cov0" title="0">{
+                return int(s.Port)
+        }</span>
+        <span class="cov0" title="0">return 0</span>
+}
+
+func (r RsdHandshakeResponse) GetServices() map[string]RsdServiceEntry <span class="cov0" title="0">{
+        return r.Services
+}</span>
+
+// NewWithAddrPort creates a new RsdService with the given address and port 58783 using a HTTP2 based XPC connection,
+// connecting to an operating system level TUN device.
+func NewWithAddrPort(addr string, port int) (RsdService, error) <span class="cov0" title="0">{
+        conn, err := ConnectTUN(addr, port)
+        if err != nil </span><span class="cov0" title="0">{
+                return RsdService{}, fmt.Errorf("NewWithAddrPort: failed to connect to device: %w", err)
+        }</span>
+        <span class="cov0" title="0">return newRsdServiceFromTcpConn(conn)</span>
+}
+
+// NewWithAddr creates a new RsdService with the given address and port 58783 using a HTTP2 based XPC connection.
+func NewWithAddr(addr string) (RsdService, error) <span class="cov0" title="0">{
+        conn, err := ConnectTUN(addr, RSD_PORT)
+        if err != nil </span><span class="cov0" title="0">{
+                return RsdService{}, fmt.Errorf("NewWithAddr: failed to connect to device: %w", err)
+        }</span>
+        <span class="cov0" title="0">return newRsdServiceFromTcpConn(conn)</span>
+}
+
+func newRsdServiceFromTcpConn(conn *net.TCPConn) (RsdService, error) <span class="cov0" title="0">{
+        h, err := http.NewHttpConnection(conn)
+        if err != nil </span><span class="cov0" title="0">{
+                return RsdService{}, fmt.Errorf("newRsdServiceFromTcpConn: failed to connect to http2: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">x, err := CreateXpcConnection(h)
+        if err != nil </span><span class="cov0" title="0">{
+                return RsdService{}, fmt.Errorf("newRsdServiceFromTcpConn: failed to create xpc connection: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return RsdService{
+                xpc: x,
+                c:   h,
+        }, nil</span>
+}
+
+// Handshake sends a handshake request to the device and returns the RsdHandshakeResponse
+// which contains the UDID and the services available on the device.
+func (s RsdService) Handshake() (RsdHandshakeResponse, error) <span class="cov0" title="0">{
+        log.Debug("Starting RSD handshake")
+        m, err := s.xpc.ReceiveOnClientServerStream()
+        if err != nil </span><span class="cov0" title="0">{
+                return RsdHandshakeResponse{}, fmt.Errorf("Handshake: failed to receive handshake response. %w", err)
+        }</span>
+        <span class="cov0" title="0">udid := ""
+        productVersion := ""
+        if properties, ok := m["Properties"].(map[string]interface{}); ok </span><span class="cov0" title="0">{
+                if u, ok := properties["UniqueDeviceID"].(string); ok </span><span class="cov0" title="0">{
+                        udid = u
+                }</span>
+
+                <span class="cov0" title="0">if u, ok := properties["OSVersion"].(string); ok </span><span class="cov0" title="0">{
+                        productVersion = u
+                }</span>
+        }
+        <span class="cov0" title="0">if udid == "" </span><span class="cov0" title="0">{
+                return RsdHandshakeResponse{}, fmt.Errorf("Handshake: could not read UDID")
+        }</span>
+        <span class="cov0" title="0">if m["MessageType"] == "Handshake" </span><span class="cov0" title="0">{
+                servicesMap := m["Services"].(map[string]interface{})
+                res := make(map[string]RsdServiceEntry)
+                for s, m := range servicesMap </span><span class="cov0" title="0">{
+                        s2 := m.(map[string]interface{})["Port"].(string)
+                        p, err := strconv.ParseInt(s2, 10, 32)
+                        if err != nil </span><span class="cov0" title="0">{
+                                return RsdHandshakeResponse{}, fmt.Errorf("Handshake: failed to parse port: %w", err)
+                        }</span>
+                        <span class="cov0" title="0">res[s] = RsdServiceEntry{
+                                Port: uint32(p),
+                        }</span>
+                }
+                <span class="cov0" title="0">return RsdHandshakeResponse{
+                        Services:       res,
+                        Udid:           udid,
+                        ProductVersion: productVersion,
+                }, nil</span>
+        } else<span class="cov0" title="0"> {
+                return RsdHandshakeResponse{}, fmt.Errorf("Handshake: unknown response")
+        }</span>
+}
+</pre>
+		
+		<pre class="file" id="file10" style="display: none">package tunnel
+
+import (
+        "crypto/sha512"
+        "fmt"
+
+        "github.com/tadglines/go-pkgs/crypto/srp"
+)
+
+type srpInfo struct {
+        ClientPublic []byte
+        ClientProof  []byte
+        Salt         []byte
+        SessionKey   []byte
+        c            *srp.ClientSession
+}
+
+// newSrpInfo initializes a new SRP session with the given public key and salt values.
+func newSrpInfo(salt, publicKey []byte) (srpInfo, error) <span class="cov0" title="0">{
+        s, err := srp.NewSRP("rfc5054.3072", sha512.New, func(salt, password []byte) []byte </span><span class="cov0" title="0">{
+                h1 := sha512.New()
+                h2 := sha512.New()
+                h2.Write([]byte(fmt.Sprintf("%s:%s", "Pair-Setup", string(password))))
+                h1.Write(salt)
+                h1.Write(h2.Sum(nil))
+                return h1.Sum(nil)
+        }</span>)
+        <span class="cov0" title="0">if err != nil </span><span class="cov0" title="0">{
+                return srpInfo{}, fmt.Errorf("newSrpInfo: failed to initialize SRP: %w", err)
+        }</span>
+        <span class="cov0" title="0">c := s.NewClientSession([]byte("Pair-Setup"), []byte("000000"))
+        key, err := c.ComputeKey(salt, publicKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return srpInfo{}, fmt.Errorf("newSrpInfo: failed to compute session key: %w", err)
+        }</span>
+        <span class="cov0" title="0">a := c.ComputeAuthenticator()
+        return srpInfo{
+                ClientPublic: c.GetA(),
+                ClientProof:  a,
+                Salt:         salt,
+                SessionKey:   key,
+                c:            c,
+        }, nil</span>
+}
+
+func (s srpInfo) verifyServerProof(p []byte) bool <span class="cov0" title="0">{
+        return s.c.VerifyServerAuthenticator(p)
+}</span>
+</pre>
+		
+		<pre class="file" id="file11" style="display: none">package tunnel
+
+import (
+        "bytes"
+        "errors"
+        "fmt"
+        "io"
+        "math"
+)
+
+// https://github.com/45clouds/WirelessCarPlay/blob/e7a2d3e8035de262b1867a90bdf5c52a039d8862/source/AccessorySDK/Support/PairingUtils.c#L175
+
+/*
+#define kTLVType_Method                                        0x00 // Pairing method to use.
+        #define kTLVMethod_PairSetup                        0 // Pair-setup.
+        #define kTLVMethod_MFiPairSetup                        1 // MFi pair-setup.
+        #define kTLVMethod_Verify                                2 // Pair-verify.
+#define kTLVType_Identifier                                0x01 // Identifier of the peer.
+#define kTLVType_Salt                                        0x02 // 16+ bytes of random salt.
+#define kTLVType_PublicKey                                0x03 // Curve25519, SRP public key, or signed Ed25519 key.
+#define kTLVType_Proof                                        0x04 // SRP proof.
+#define kTLVType_EncryptedData                        0x05 // Encrypted bytes. Use AuthTag to authenticate.
+#define kTLVType_State                                        0x06 // State of the pairing process.
+#define kTLVType_Error                                        0x07 // Error code. Missing means no error.
+        #define kTLVError_Reserved0                                0x00 // Must not be used in any TLV.
+        #define kTLVError_Unknown                                0x01 // Generic error to handle unexpected errors.
+        #define kTLVError_Authentication                0x02 // Setup code or signature verification failed.
+        #define kTLVError_Backoff                                0x03 // Client must look at &lt;RetryDelay&gt; TLV item and wait before retrying.
+        #define kTLVError_UnknownPeer                        0x04 // Peer is not paired.
+        #define kTLVError_MaxPeers                                0x05 // Server cannot accept any more pairings.
+        #define kTLVError_MaxTries                                0x06 // Server reached its maximum number of authentication attempts
+#define kTLVType_RetryDelay                                        0x08 // Seconds to delay until retrying setup.
+#define kTLVType_Certificate                        0x09 // X.509 Certificate.
+#define kTLVType_Signature                                0x0A // Ed25519 or MFi auth IC signature.
+#define kTLVType_ReservedB                                0x0B // Reserved.
+#define kTLVType_FragmentData                        0x0C // Non-last fragment of data. If length is 0, it's an ack.
+#define kTLVType_FragmentLast                        0x0D // Last fragment of data.
+*/
+
+type tlvType uint8
+type pairingState uint8
+
+const (
+        pairStateStartRequest     = byte(0x01)
+        pairStateStartResponse    = 0x02
+        pairStateVerifyRequest    = 0x03
+        pairStateVerifyResponse   = 0x04
+        pairStateExchangeRequest  = 0x05
+        pairStateExchangeResponse = 0x06
+        pairStateDone             = 0x07
+)
+
+const (
+        typeMethod        = tlvType(0x00)
+        typeIdentifier    = tlvType(0x01)
+        typeSalt          = tlvType(0x02)
+        typePublicKey     = tlvType(0x03)
+        typeProof         = tlvType(0x04)
+        typeEncryptedData = tlvType(0x05)
+        typeState         = tlvType(0x06)
+        typeError         = tlvType(0x07)
+        typeSignature     = tlvType(0x0A)
+        typeInfo          = tlvType(0x11)
+)
+
+type tlvBuffer struct {
+        buf *bytes.Buffer
+}
+
+func newTlvBuffer() tlvBuffer <span class="cov8" title="1">{
+        return tlvBuffer{buf: bytes.NewBuffer(nil)}
+}</span>
+
+func (b tlvBuffer) writeData(t tlvType, data []byte) <span class="cov8" title="1">{
+        if len(data) &gt; math.MaxUint8 </span><span class="cov8" title="1">{
+                b.buf.WriteByte(byte(t))
+                b.buf.WriteByte(byte(math.MaxUint8))
+                b.buf.Write(data[:math.MaxUint8])
+                b.writeData(t, data[math.MaxUint8:])
+        }</span> else<span class="cov8" title="1"> {
+                b.buf.WriteByte(byte(t))
+                b.buf.WriteByte(byte(len(data)))
+                b.buf.Write(data)
+        }</span>
+}
+
+func (b tlvBuffer) writeByte(t tlvType, v uint8) <span class="cov8" title="1">{
+        b.writeData(t, []byte{v})
+}</span>
+
+func (b tlvBuffer) bytes() []byte <span class="cov8" title="1">{
+        return b.buf.Bytes()
+}</span>
+
+type tlvReader []byte
+
+func (r tlvReader) readCoalesced(t tlvType) ([]byte, error) <span class="cov8" title="1">{
+        reader := bytes.NewReader(r)
+        buf := bytes.NewBuffer(nil)
+
+        for </span><span class="cov8" title="1">{
+                chunkType, err := reader.ReadByte()
+                if err != nil </span><span class="cov8" title="1">{
+                        if errors.Is(err, io.EOF) </span><span class="cov8" title="1">{
+                                break</span>
+                        }
+                        <span class="cov0" title="0">return nil, err</span>
+                }
+                <span class="cov8" title="1">l, _ := reader.ReadByte()
+                if tlvType(chunkType) == t </span><span class="cov8" title="1">{
+                        _, err = io.CopyN(buf, reader, int64(l))
+                }</span> else<span class="cov8" title="1"> {
+                        _, err = io.CopyN(io.Discard, reader, int64(l))
+                }</span>
+                <span class="cov8" title="1">if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("readCoalesced: failed to read bytes of length %d: %w", l, err)
+                }</span>
+        }
+
+        <span class="cov8" title="1">return buf.Bytes(), nil</span>
+}
+
+type tlvError byte
+
+var errorNames = [...]string{"reserved0", "unknown", "authentication", "backoff", "unknownpeer", "maxpeers", "maxtries"}
+
+func (e tlvError) Error() string <span class="cov8" title="1">{
+        if int(e) &gt;= 0 &amp;&amp; int(e) &lt; len(errorNames) </span><span class="cov8" title="1">{
+                return errorNames[e]
+        }</span>
+        <span class="cov8" title="1">return fmt.Sprintf("unknown error code '%d'", e)</span>
+}
+</pre>
+		
+		<pre class="file" id="file12" style="display: none">package tunnel
+
+import (
+        "sync"
+
+        "github.com/dmdmdm-nz/tunneld/internal/runtime"
+)
+
+type TunnelNotifications struct {
+        subsMu sync.Mutex
+        subs   map[int]*runtime.SubQueue[TunnelEvent]
+        nextID int
+
+        closed bool
+}
+
+func NewTunnelNotifications() *TunnelNotifications <span class="cov0" title="0">{
+        return &amp;TunnelNotifications{
+                subs: make(map[int]*runtime.SubQueue[TunnelEvent]),
+        }
+}</span>
+
+// Subscribe follows the same "snapshot as Adds, then live" pattern.
+func (tn *TunnelNotifications) Subscribe() (&lt;-chan TunnelEvent, func()) <span class="cov0" title="0">{
+        sub := runtime.NewSubQueue[TunnelEvent](8)
+
+        // Register paused
+        tn.subsMu.Lock()
+        id := tn.nextID
+        tn.nextID++
+        tn.subs[id] = sub
+        tn.subsMu.Unlock()
+
+        // Go live
+        sub.SetPaused(false)
+
+        unsub := func() </span><span class="cov0" title="0">{
+                tn.subsMu.Lock()
+                if q, ok := tn.subs[id]; ok </span><span class="cov0" title="0">{
+                        delete(tn.subs, id)
+                        q.Close()
+                }</span>
+                <span class="cov0" title="0">tn.subsMu.Unlock()</span>
+        }
+        <span class="cov0" title="0">return sub.Chan(), unsub</span>
+}
+
+func (tn *TunnelNotifications) Close() error <span class="cov0" title="0">{
+
+        tn.subsMu.Lock()
+        defer tn.subsMu.Unlock()
+        if tn.closed </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+        <span class="cov0" title="0">tn.closed = true
+        for id, q := range tn.subs </span><span class="cov0" title="0">{
+                q.Close()
+                delete(tn.subs, id)
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+
+func (tn *TunnelNotifications) broadcast(ev TunnelEvent) <span class="cov0" title="0">{
+        tn.subsMu.Lock()
+        defer tn.subsMu.Unlock()
+        for _, sub := range tn.subs </span><span class="cov0" title="0">{
+                sub.Enqueue(ev)
+        }</span>
+}
+
+func (tn *TunnelNotifications) NotifyTunnelStatus(udid string, status TunnelStatus) <span class="cov0" title="0">{
+        tn.broadcast(TunnelEvent{
+                Type:   TunnelProgress,
+                Udid:   udid,
+                Status: status,
+        })
+}</span>
+
+func (tn *TunnelNotifications) NotifyDevicePaired(udid string) <span class="cov0" title="0">{
+        tn.broadcast(TunnelEvent{
+                Type:   DevicePaired,
+                Udid:   udid,
+                Status: Paired,
+        })
+}</span>
+
+func (tn *TunnelNotifications) NotifyDeviceNotPaired(udid string) <span class="cov0" title="0">{
+        tn.broadcast(TunnelEvent{
+                Type:   DeviceNotPaired,
+                Udid:   udid,
+                Status: Disconnected,
+        })
+}</span>
+</pre>
+		
+		<pre class="file" id="file13" style="display: none">package tunnel
+
+import (
+        "bytes"
+        "context"
+        "encoding/binary"
+        "encoding/json"
+        "errors"
+        "fmt"
+        "io"
+        "maps"
+        "net"
+        "os"
+        "os/exec"
+
+        "github.com/dmdmdm-nz/tunneld/internal/tls"
+        "github.com/dmdmdm-nz/tunneld/internal/tunnel/http"
+
+        log "github.com/sirupsen/logrus"
+        "github.com/songgao/water"
+)
+
+const TUNNEL_MTU = 64_000
+
+// Tunnel describes the parameters of an established tunnel to the device
+type Tunnel struct {
+        Address          string           `json:"address"`          // Address is the IPv6 address of the device over the tunnel
+        RsdPort          int              `json:"rsdPort"`          // RsdPort is the port on which remote service discover is reachable
+        Services         []RsdServiceInfo `json:"-"`                // Services is the list of RSD services available on the device
+        Udid             string           `json:"udid"`             // Udid is the id of the device for this tunnel
+        UserspaceTUN     bool             `json:"userspaceTun"`     // Always false
+        UserspaceTUNPort int              `json:"userspaceTunPort"` // Always 0
+        TunnelContext    context.Context  `json:"-"`
+        closer           func() error     `json:"-"`
+}
+
+// Close closes the connection to the device and removes the virtual network interface from the host
+func (t Tunnel) Close() error <span class="cov0" title="0">{
+        return t.closer()
+}</span>
+
+// ManualPairAndConnectToTunnel tries to verify an existing pairing, and if this fails it triggers a new manual pairing process.
+// After a successful pairing a tunnel for this device gets started and the tunnel information is returned
+func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, addr string, udid string, autoPair bool, tn *TunnelNotifications) (Tunnel, error) <span class="cov0" title="0">{
+        tn.NotifyTunnelStatus(udid, ConnectingToDevice)
+
+        resumeRemoted, err := SuspendRemoted()
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to suspend remoted: %w", err)
+        }</span>
+        <span class="cov0" title="0">defer resumeRemoted()
+
+        port, err := getUntrustedTunnelServicePort(addr)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: could not find port for '%s'", untrustedTunnelServiceName)
+        }</span>
+        <span class="cov0" title="0">conn, err := ConnectTUN(addr, port)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to connect to TUN device: %w", err)
+        }</span>
+        <span class="cov0" title="0">defer conn.Close()
+
+        h, err := http.NewHttpConnection(conn)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create HTTP2 connection: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">xpcConn, err := CreateXpcConnection(h)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create RemoteXPC connection: %w", err)
+        }</span>
+        <span class="cov0" title="0">ts := newTunnelServiceWithXpc(xpcConn, h, p)
+
+        tn.NotifyTunnelStatus(udid, VerifyingPairing)
+        pairingResult, err := ts.VerifyPairing(ctx, udid)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to verify pairing: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">if pairingResult.NeedsPairing </span><span class="cov0" title="0">{
+                tn.NotifyDeviceNotPaired(udid)
+
+                if autoPair </span><span class="cov0" title="0">{
+                        tn.NotifyTunnelStatus(udid, Pairing)
+                        log.WithField("udid", udid).Info("Device needs pairing, displaying dialog")
+
+                        pairingResult, err = ts.ManualPair(ctx, udid, pairingResult.SharedSecret)
+                        if err == nil </span><span class="cov0" title="0">{
+                                // We need to re-establish the connection after a new pairing.
+                                tn.NotifyTunnelStatus(udid, Disconnected)
+                                return Tunnel{}, errors.New("ManualPairAndConnectToTunnel: new pairing created, re-attempting connection")
+                        }</span> else<span class="cov0" title="0"> {
+                                tn.NotifyTunnelStatus(udid, Failed)
+                                return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: pairing failed: %w", err)
+                        }</span>
+                } else<span class="cov0" title="0"> {
+                        tn.NotifyTunnelStatus(udid, Failed)
+                        return Tunnel{}, errors.New("ManualPairAndConnectToTunnel: device not paired")
+                }</span>
+        }
+
+        <span class="cov0" title="0">tn.NotifyDevicePaired(udid)
+        tn.NotifyTunnelStatus(udid, Paired)
+
+        tunnelInfo, err := ts.createTunnelListener(pairingResult.SharedSecret)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to create tunnel listener: %w", err)
+        }</span>
+        <span class="cov0" title="0">t, err := connectToTunnel(ctx, tunnelInfo, addr, udid, pairingResult.SharedSecret)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to connect to tunnel: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">tn.NotifyTunnelStatus(udid, Connected)
+        return t, nil</span>
+}
+
+// ManualPair tries to verify an existing pairing, and if this fails it triggers a new manual pairing process.
+func ManualPair(ctx context.Context, p *PairRecordManager, addr string, udid string, tn *TunnelNotifications) error <span class="cov0" title="0">{
+        tn.NotifyTunnelStatus(udid, ConnectingToDevice)
+
+        resumeRemoted, err := SuspendRemoted()
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return fmt.Errorf("ManualPair: failed to suspend remoted: %w", err)
+        }</span>
+        <span class="cov0" title="0">defer resumeRemoted()
+
+        port, err := getUntrustedTunnelServicePort(addr)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return fmt.Errorf("ManualPair: could not find port for '%s'", untrustedTunnelServiceName)
+        }</span>
+        <span class="cov0" title="0">conn, err := ConnectTUN(addr, port)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return fmt.Errorf("ManualPair: failed to connect to TUN device: %w", err)
+        }</span>
+        <span class="cov0" title="0">defer conn.Close()
+
+        h, err := http.NewHttpConnection(conn)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return fmt.Errorf("ManualPair: failed to create HTTP2 connection: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">xpcConn, err := CreateXpcConnection(h)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return fmt.Errorf("ManualPair: failed to create RemoteXPC connection: %w", err)
+        }</span>
+        <span class="cov0" title="0">ts := newTunnelServiceWithXpc(xpcConn, h, p)
+
+        tn.NotifyTunnelStatus(udid, VerifyingPairing)
+        pairingResult, err := ts.VerifyPairing(ctx, udid)
+        if err != nil </span><span class="cov0" title="0">{
+                tn.NotifyTunnelStatus(udid, Failed)
+                return fmt.Errorf("ManualPairAndConnectToTunnel: failed to verify pairing: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">if pairingResult.NeedsPairing </span><span class="cov0" title="0">{
+                tn.NotifyDeviceNotPaired(udid)
+                tn.NotifyTunnelStatus(udid, Pairing)
+                log.WithField("udid", udid).Info("Device needs pairing, displaying dialog")
+
+                pairingResult, err = ts.ManualPair(ctx, udid, pairingResult.SharedSecret)
+                if err != nil </span><span class="cov0" title="0">{
+                        tn.NotifyTunnelStatus(udid, Failed)
+                        return fmt.Errorf("ManualPairAndConnectToTunnel: pairing failed: %w", err)
+                }</span>
+        }
+
+        <span class="cov0" title="0">tn.NotifyDevicePaired(udid)
+        tn.NotifyTunnelStatus(udid, Disconnected)
+        return nil</span>
+}
+
+func getUntrustedTunnelServicePort(addr string) (int, error) <span class="cov0" title="0">{
+        rsdService, err := NewWithAddr(addr)
+        if err != nil </span><span class="cov0" title="0">{
+                return 0, fmt.Errorf("getUntrustedTunnelServicePort: failed to connect to RSD service: %w", err)
+        }</span>
+        <span class="cov0" title="0">defer rsdService.Close()
+        handshakeResponse, err := rsdService.Handshake()
+        if err != nil </span><span class="cov0" title="0">{
+                return 0, fmt.Errorf("getUntrustedTunnelServicePort: failed to perform RSD handshake: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">port := handshakeResponse.GetPort(untrustedTunnelServiceName)
+        if port == 0 </span><span class="cov0" title="0">{
+                log.WithField("services", maps.Values(handshakeResponse.Services)).Info("Available services")
+                return 0, fmt.Errorf("getUntrustedTunnelServicePort: could not find port for '%s'", untrustedTunnelServiceName)
+        }</span>
+        <span class="cov0" title="0">return port, nil</span>
+}
+
+func connectToTunnel(ctx context.Context, info tunnelListener, addr string, udid string, sharedSecret []byte) (Tunnel, error) <span class="cov0" title="0">{
+        tlsConfig, err := createTlsConfig(info, sharedSecret)
+        if err != nil </span><span class="cov0" title="0">{
+                return Tunnel{}, err
+        }</span>
+
+        <span class="cov0" title="0">conn, err := tls.Dial("tcp", fmt.Sprintf("[%s]:%d", addr, info.TunnelPort), tlsConfig)
+        if err != nil </span><span class="cov0" title="0">{
+                return Tunnel{}, fmt.Errorf("failed to create TCP connection to tunnel: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">stream := struct {
+                io.Reader
+                io.Writer
+                io.Closer
+        }{conn, conn, conn}
+
+        tunnelInfo, err := exchangeCoreTunnelParameters(stream)
+        if err != nil </span><span class="cov0" title="0">{
+                return Tunnel{}, fmt.Errorf("could not exchange tunnel parameters. %w", err)
+        }</span>
+
+        <span class="cov0" title="0">utunIface, err := setupTunnelInterface(tunnelInfo)
+        if err != nil </span><span class="cov0" title="0">{
+                return Tunnel{}, fmt.Errorf("could not setup tunnel interface. %w", err)
+        }</span>
+
+        <span class="cov0" title="0">tunnelCtx, cancel := context.WithCancel(ctx)
+        closeFunc := func() error </span><span class="cov0" title="0">{
+                cancel()
+                tlsErr := conn.Close()
+                utunErr := utunIface.Close()
+                return errors.Join(tlsErr, utunErr)
+        }</span>
+
+        <span class="cov0" title="0">go func() </span><span class="cov0" title="0">{
+                err := forwardDataToInterface(tunnelCtx, tunnelInfo.ClientParameters.Mtu, utunIface, conn)
+                if err != nil &amp;&amp; !isClosedError(err) </span><span class="cov0" title="0">{
+                        log.WithError(err).Trace("Exiting device-&gt;tunnel data forwarder")
+                }</span>
+
+                <span class="cov0" title="0">closeFunc()</span>
+        }()
+
+        <span class="cov0" title="0">go func() </span><span class="cov0" title="0">{
+                err := forwardDataToDevice(tunnelCtx, tunnelInfo.ClientParameters.Mtu, utunIface, conn)
+                if err != nil &amp;&amp; !isClosedError(err) </span><span class="cov0" title="0">{
+                        log.WithError(err).Trace("Exiting tunnel-&gt;device data forwarder")
+                }</span>
+
+                <span class="cov0" title="0">closeFunc()</span>
+        }()
+
+        <span class="cov0" title="0">services, err := listRsdServices(tunnelInfo.ServerAddress, int(tunnelInfo.ServerRSDPort))
+        if err != nil </span><span class="cov0" title="0">{
+                closeFunc()
+                return Tunnel{}, fmt.Errorf("could not list RSD services: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return Tunnel{
+                Address:       tunnelInfo.ServerAddress,
+                RsdPort:       int(tunnelInfo.ServerRSDPort),
+                Services:      services,
+                Udid:          udid,
+                TunnelContext: tunnelCtx,
+                closer:        closeFunc,
+        }, nil</span>
+}
+
+func setupTunnelInterface(tunnelInfo tunnelParameters) (io.ReadWriteCloser, error) <span class="cov0" title="0">{
+        ifce, err := water.New(water.Config{
+                DeviceType: water.TUN,
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("setupTunnelInterface: failed creating TUN device %w", err)
+        }</span>
+
+        <span class="cov0" title="0">const prefixLength = 64 // TODO: this could be calculated from the netmask provided by the device
+
+        setIpAddr := exec.Command("ifconfig", ifce.Name(), "inet6", "add", fmt.Sprintf("%s/%d", tunnelInfo.ClientParameters.Address, prefixLength))
+        err = runCmd(setIpAddr)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("setupTunnelInterface: failed to set IP address for interface: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">enableIfce := exec.Command("ifconfig", ifce.Name(), "up")
+        err = runCmd(enableIfce)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("setupTunnelInterface: failed to enable interface %s: %w", ifce.Name(), err)
+        }</span>
+
+        <span class="cov0" title="0">return ifce, nil</span>
+}
+
+func runCmd(cmd *exec.Cmd) error <span class="cov0" title="0">{
+        buf := new(bytes.Buffer)
+        cmd.Stderr = buf
+        err := cmd.Run()
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("runCmd: failed to exeute command (stderr: %s): %w", buf.String(), err)
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+
+func createTlsConfig(info tunnelListener, sharedSecret []byte) (*tls.Config, error) <span class="cov0" title="0">{
+        conf := &amp;tls.Config{
+                CipherSuites: []uint16{
+                        tls.TLS_PSK_WITH_AES_128_GCM_SHA256,
+                },
+                Certificates: []tls.Certificate{{}},
+                MaxVersion:   tls.VersionTLS12,
+                MinVersion:   tls.VersionTLS12,
+                ServerName:   "",
+                Extra: tls.PSKConfig{
+                        GetIdentity: func() string </span><span class="cov0" title="0">{
+                                return ""
+                        }</span>,
+                        GetKey: func(identity string) ([]byte, error) <span class="cov0" title="0">{
+                                return sharedSecret, nil
+                        }</span>,
+                },
+        }
+        <span class="cov0" title="0">return conf, nil</span>
+}
+
+// isClosedError returns true if the error is due to a closed connection or file.
+// These errors are expected during tunnel shutdown.
+func isClosedError(err error) bool <span class="cov0" title="0">{
+        return errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrClosed)
+}</span>
+
+func forwardDataToDevice(ctx context.Context, mtu uint64, r io.Reader, conn *tls.Conn) error <span class="cov0" title="0">{
+        packet := make([]byte, mtu)
+        for </span><span class="cov0" title="0">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov0" title="0">
+                        return nil</span>
+                default:<span class="cov0" title="0">
+                        n, err := r.Read(packet)
+                        if err != nil </span><span class="cov0" title="0">{
+                                return fmt.Errorf("could not read packet. %w", err)
+                        }</span>
+
+                        <span class="cov0" title="0">_, err = conn.Write(packet[:n])
+                        if err != nil </span><span class="cov0" title="0">{
+                                return fmt.Errorf("could not write packet. %w", err)
+                        }</span>
+                }
+        }
+}
+
+func forwardDataToInterface(ctx context.Context, mtu uint64, w io.Writer, conn *tls.Conn) error <span class="cov0" title="0">{
+        packet := make([]byte, mtu)
+        ipv6_header := make([]byte, 40)
+
+        for </span><span class="cov0" title="0">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov0" title="0">
+                        return nil</span>
+                default:<span class="cov0" title="0">
+
+                        // It's important when writing to the TUN interface that we write a full IPv6 packet at once.
+                        // So we first read the IPv6 header to get the length of the packet, and then we read the rest of the packet
+                        // and write it to the TUN interface in one go.
+
+                        // Read the IPv6 header first (40 bytes)
+                        _, err := io.ReadFull(conn, ipv6_header)
+                        if err != nil </span><span class="cov0" title="0">{
+                                return fmt.Errorf("failed to read data. %w", err)
+                        }</span>
+
+                        <span class="cov0" title="0">ipv6_length := binary.BigEndian.Uint16(ipv6_header[4:6])
+                        ipv6_body := make([]byte, ipv6_length)
+                        _, err = io.ReadFull(conn, ipv6_body[:ipv6_length])
+                        if err != nil </span><span class="cov0" title="0">{
+                                return fmt.Errorf("failed to read data. %w", err)
+                        }</span>
+
+                        <span class="cov0" title="0">totalLen := len(ipv6_header) + int(ipv6_length)
+                        n := copy(packet, ipv6_header)
+                        copy(packet[n:], ipv6_body[:ipv6_length])
+
+                        if _, err := w.Write(packet[:totalLen]); err != nil </span><span class="cov0" title="0">{
+                                return fmt.Errorf("failed to write packet: %w", err)
+                        }</span>
+                }
+        }
+}
+
+func exchangeCoreTunnelParameters(stream io.ReadWriteCloser) (tunnelParameters, error) <span class="cov0" title="0">{
+        rq, err := json.Marshal(map[string]interface{}{
+                "type": "clientHandshakeRequest",
+                "mtu":  TUNNEL_MTU,
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelParameters{}, err
+        }</span>
+
+        <span class="cov0" title="0">buf := bytes.NewBuffer(nil)
+        // Write on bytes.Buffer never returns an error
+        _, _ = buf.Write([]byte("CDTunnel\000"))
+        _ = buf.WriteByte(byte(len(rq)))
+        _, _ = buf.Write(rq)
+
+        _, err = stream.Write(buf.Bytes())
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelParameters{}, err
+        }</span>
+
+        <span class="cov0" title="0">header := make([]byte, len("CDTunnel")+2)
+        _, err = stream.Read(header)
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelParameters{}, fmt.Errorf("could not header read from stream. %w", err)
+        }</span>
+
+        <span class="cov0" title="0">bodyLen := header[len(header)-1]
+
+        res := make([]byte, bodyLen)
+        length, err := stream.Read(res)
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelParameters{}, fmt.Errorf("could not read from stream. %w", err)
+        }</span>
+
+        <span class="cov0" title="0">var parameters tunnelParameters
+        err = json.Unmarshal(res[:length], &amp;parameters)
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelParameters{}, err
+        }</span>
+        <span class="cov0" title="0">return parameters, nil</span>
+}
+
+func listRsdServices(address string, port int) ([]RsdServiceInfo, error) <span class="cov0" title="0">{
+        rsd, err := NewWithAddrPort(address, port)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to create RSD service: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">handshakeResponse, err := rsd.Handshake()
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to perform RSD handshake: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">services := handshakeResponse.GetServices()
+
+        portList := make([]RsdServiceInfo, 0, len(services))
+        for key, svc := range services </span><span class="cov0" title="0">{
+                portList = append(portList, RsdServiceInfo{Name: key, Port: svc.Port})
+        }</span>
+
+        <span class="cov0" title="0">return portList, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file14" style="display: none">package tunnel
+
+type TunnelStatus int
+
+func (t TunnelStatus) String() string <span class="cov8" title="1">{
+        switch t </span>{
+        case Disconnected:<span class="cov8" title="1">
+                return "Disconnected"</span>
+        case ConnectingToDevice:<span class="cov8" title="1">
+                return "ConnectingToDevice"</span>
+        case VerifyingPairing:<span class="cov8" title="1">
+                return "VerifyingPairing"</span>
+        case Pairing:<span class="cov8" title="1">
+                return "Pairing"</span>
+        case Paired:<span class="cov8" title="1">
+                return "ConnectingToTunnel"</span>
+        case Failed:<span class="cov8" title="1">
+                return "Failed"</span>
+        case Connected:<span class="cov8" title="1">
+                return "Connected"</span>
+        default:<span class="cov8" title="1">
+                return "Unknown"</span>
+        }
+}
+
+const (
+        Disconnected TunnelStatus = iota
+        ConnectingToDevice
+        VerifyingPairing
+        Pairing
+        Paired
+        Failed
+        Connected
+)
+
+type TunnelEventType string
+
+const (
+        DeviceNotPaired TunnelEventType = "DEVICE_NOT_PAIRED"
+        DevicePaired    TunnelEventType = "DEVICE_PAIRED"
+        TunnelProgress  TunnelEventType = "TUNNEL_PROGRESS"
+)
+
+type TunnelEvent struct {
+        Type   TunnelEventType
+        Udid   string
+        Status TunnelStatus
+}
+
+type EventHandler func(event TunnelEvent)
+
+type RsdServiceInfo struct {
+        Name string `json:"name"`
+        Port uint32 `json:"port"`
+}
+</pre>
+		
+		<pre class="file" id="file15" style="display: none">package tunnel
+
+import (
+        "bytes"
+        "context"
+        "crypto/ecdh"
+        "crypto/rand"
+        "crypto/rsa"
+        "crypto/sha512"
+        "crypto/x509"
+        "encoding/base64"
+        "fmt"
+
+        "io"
+
+        "github.com/dmdmdm-nz/tunneld/internal/tunnel/opack"
+        "github.com/dmdmdm-nz/tunneld/internal/tunnel/xpc"
+
+        log "github.com/sirupsen/logrus"
+        "golang.org/x/crypto/chacha20poly1305"
+        "golang.org/x/crypto/ed25519"
+        "golang.org/x/crypto/hkdf"
+)
+
+// untrustedTunnelServiceName is the service name that is described in the Remote Service Discovery of the
+// ethernet interface of the device (not the tunnel interface)
+const untrustedTunnelServiceName = "com.apple.internal.dt.coredevice.untrusted.tunnelservice"
+
+type PairingResult struct {
+        SharedSecret []byte
+        NeedsPairing bool
+}
+
+func newTunnelServiceWithXpc(xpcConn *xpc.Connection, c io.Closer, pairRecords *PairRecordManager) *tunnelService <span class="cov0" title="0">{
+        return &amp;tunnelService{
+                xpcConn:        xpcConn,
+                c:              c,
+                controlChannel: newControlChannelReadWriter(xpcConn),
+                pairRecords:    pairRecords,
+        }
+}</span>
+
+type tunnelService struct {
+        xpcConn *xpc.Connection
+        c       io.Closer
+
+        controlChannel *controlChannelReadWriter
+        cipher         *cipherStream
+
+        pairRecords *PairRecordManager
+}
+
+func (t *tunnelService) Close() error <span class="cov0" title="0">{
+        return t.c.Close()
+}</span>
+
+// VerifyPairing verifies that there is already an active pairing with the credentials stored in PairRecordManager
+func (t *tunnelService) VerifyPairing(ctx context.Context, udid string) (PairingResult, error) <span class="cov0" title="0">{
+        err := t.controlChannel.writeRequest(map[string]interface{}{
+                "handshake": map[string]interface{}{
+                        "_0": map[string]interface{}{
+                                "hostOptions": map[string]interface{}{
+                                        "attemptPairVerify": true,
+                                },
+                                "wireProtocolVersion": int64(19),
+                        },
+                },
+        })
+
+        if err != nil </span><span class="cov0" title="0">{
+                return PairingResult{}, fmt.Errorf("ManualPair: failed to send 'attemptPairVerify' request: %w", err)
+        }</span>
+        // ignore the response for now
+        <span class="cov0" title="0">_, err = t.controlChannel.read()
+        if err != nil </span><span class="cov0" title="0">{
+                return PairingResult{}, fmt.Errorf("ManualPair: failed to read 'attemptPairVerify' response: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">sharedSecret, err := t.verifyPair()
+        if err == nil </span><span class="cov0" title="0">{
+                return PairingResult{SharedSecret: sharedSecret}, nil
+        }</span>
+
+        <span class="cov0" title="0">return PairingResult{SharedSecret: sharedSecret, NeedsPairing: true}, nil</span>
+}
+
+// ManualPair triggers a device pairing that requires the user to press the 'Trust' button on the device that appears
+// when this operation is triggered
+// If there is already an active pairing with the credentials stored in PairRecordManager this call does not trigger
+// anything on the device and returns with an error
+func (t *tunnelService) ManualPair(ctx context.Context, udid string, sharedSecret []byte) (PairingResult, error) <span class="cov0" title="0">{
+        err := t.setupManualPairing()
+        if err != nil </span><span class="cov0" title="0">{
+                return PairingResult{}, fmt.Errorf("ManualPair: failed to initiate manual pairing: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">sessionKey, err := t.setupSessionKey(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return PairingResult{}, fmt.Errorf("ManualPair: failed to setup SRP session key: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">err = t.exchangeDeviceInfo(sessionKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return PairingResult{}, fmt.Errorf("ManualPair: failed to exchange device info: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">err = t.setupCiphers(sessionKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return PairingResult{}, fmt.Errorf("ManualPair: failed to setup session ciphers: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">_, err = t.createUnlockKey()
+        if err != nil </span><span class="cov0" title="0">{
+                return PairingResult{}, fmt.Errorf("ManualPair: failed to create unlock key: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return PairingResult{SharedSecret: sharedSecret}, nil</span>
+}
+
+func (t *tunnelService) createTunnelListener(sharedSecret []byte) (tunnelListener, error) <span class="cov0" title="0">{
+        err := t.cipher.write(map[string]interface{}{
+                "request": map[string]interface{}{
+                        "_0": map[string]interface{}{
+                                "createListener": map[string]interface{}{
+                                        "key":                   base64.StdEncoding.EncodeToString(sharedSecret),
+                                        "transportProtocolType": "tcp",
+                                },
+                        },
+                },
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelListener{}, err
+        }</span>
+
+        <span class="cov0" title="0">var listenerRes map[string]interface{}
+        err = t.cipher.read(&amp;listenerRes)
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelListener{}, err
+        }</span>
+
+        <span class="cov0" title="0">createListener, err := getChildMap(listenerRes, "response", "_1", "createListener")
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelListener{}, err
+        }</span>
+        <span class="cov0" title="0">port := createListener["port"].(float64)
+        devPublicKeyRaw, found := createListener["devicePublicKey"]
+        if !found </span><span class="cov0" title="0">{
+                return tunnelListener{}, fmt.Errorf("no public key found")
+        }</span>
+        <span class="cov0" title="0">devPublicKey, isString := devPublicKeyRaw.(string)
+        if !isString </span><span class="cov0" title="0">{
+                return tunnelListener{}, fmt.Errorf("public key is not a string")
+        }</span>
+        <span class="cov0" title="0">devPK, err := base64.StdEncoding.DecodeString(devPublicKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelListener{}, err
+        }</span>
+        <span class="cov0" title="0">publicKey, err := x509.ParsePKIXPublicKey(devPK)
+        if err != nil </span><span class="cov0" title="0">{
+                return tunnelListener{}, err
+        }</span>
+        <span class="cov0" title="0">return tunnelListener{
+                PrivateKey:      nil,
+                DevicePublicKey: publicKey,
+                TunnelPort:      uint64(port),
+        }, nil</span>
+}
+
+func (t *tunnelService) setupCiphers(sessionKey []byte) error <span class="cov0" title="0">{
+        clientKey := make([]byte, 32)
+        _, err := hkdf.New(sha512.New, sessionKey, nil, []byte("ClientEncrypt-main")).Read(clientKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">serverKey := make([]byte, 32)
+        _, err = hkdf.New(sha512.New, sessionKey, nil, []byte("ServerEncrypt-main")).Read(serverKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">server, err := chacha20poly1305.New(serverKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">client, err := chacha20poly1305.New(clientKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">t.cipher = newCipherStream(t.controlChannel, client, server)
+
+        return nil</span>
+}
+
+func (t *tunnelService) setupManualPairing() error <span class="cov0" title="0">{
+        buf := newTlvBuffer()
+        buf.writeByte(typeMethod, 0x00)
+        buf.writeByte(typeState, pairStateStartRequest)
+
+        event := pairingData{
+                data:            buf.bytes(),
+                kind:            "setupManualPairing",
+                startNewSession: true,
+        }
+
+        err := t.controlChannel.writeEvent(&amp;event)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">_, err = t.controlChannel.read()
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">return err</span>
+}
+
+func (t *tunnelService) readDeviceKey(ctx context.Context) (publicKey []byte, salt []byte, err error) <span class="cov0" title="0">{
+        var pairingData pairingData
+        done := make(chan error, 1)
+
+        go func() </span><span class="cov0" title="0">{
+                done &lt;- t.controlChannel.readEvent(&amp;pairingData)
+        }</span>()
+
+        <span class="cov0" title="0">select </span>{
+        case &lt;-ctx.Done():<span class="cov0" title="0">
+                err = ctx.Err()
+                return</span>
+        case err = &lt;-done:<span class="cov0" title="0">
+                if err != nil </span><span class="cov0" title="0">{
+                        return
+                }</span>
+        }
+
+        <span class="cov0" title="0">publicKey, err = tlvReader(pairingData.data).readCoalesced(typePublicKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+        <span class="cov0" title="0">salt, err = tlvReader(pairingData.data).readCoalesced(typeSalt)
+        if err != nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+        <span class="cov0" title="0">return</span>
+}
+
+func (t *tunnelService) createUnlockKey() ([]byte, error) <span class="cov0" title="0">{
+        err := t.cipher.write(map[string]interface{}{
+                "request": map[string]interface{}{
+                        "_0": map[string]interface{}{
+                                "createRemoteUnlockKey": map[string]interface{}{},
+                        },
+                },
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">var res map[string]interface{}
+        err = t.cipher.read(&amp;res)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">return nil, err</span>
+}
+
+func (t *tunnelService) verifyPair() ([]byte, error) <span class="cov0" title="0">{
+        key, _ := ecdh.X25519().GenerateKey(rand.Reader)
+        tlv := newTlvBuffer()
+        tlv.writeByte(typeState, pairStateStartRequest)
+        tlv.writeData(typePublicKey, key.PublicKey().Bytes())
+
+        event := pairingData{
+                data:            tlv.bytes(),
+                kind:            "verifyManualPairing",
+                startNewSession: true,
+        }
+
+        selfId := t.pairRecords.selfId
+
+        err := t.controlChannel.writeEvent(&amp;event)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">var devP pairingData
+        err = t.controlChannel.readEvent(&amp;devP)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">devicePublicKeyBytes, err := tlvReader(devP.data).readCoalesced(typePublicKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">if devicePublicKeyBytes == nil </span><span class="cov0" title="0">{
+                _ = t.controlChannel.writeEvent(pairVerifyFailed{})
+                return nil, fmt.Errorf("verifyPair: did not get public key from device. Can not verify pairing")
+        }</span>
+        <span class="cov0" title="0">devicePublicKey, err := ecdh.X25519().NewPublicKey(devicePublicKeyBytes)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">sharedSecret, err := key.ECDH(devicePublicKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">derived := make([]byte, 32)
+        _, err = hkdf.New(sha512.New, sharedSecret, []byte("Pair-Verify-Encrypt-Salt"), []byte("Pair-Verify-Encrypt-Info")).Read(derived)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">ci, err := chacha20poly1305.New(derived)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">signBuf := bytes.NewBuffer(nil)
+        // Write on bytes.Buffer never returns an error
+        _, _ = signBuf.Write(key.PublicKey().Bytes())
+        _, _ = signBuf.Write([]byte(selfId.Identifier))
+        _, _ = signBuf.Write(devicePublicKeyBytes)
+
+        signature := ed25519.Sign(selfId.privateKey(), signBuf.Bytes())
+
+        cTlv := newTlvBuffer()
+        cTlv.writeData(typeSignature, signature)
+        cTlv.writeData(typeIdentifier, []byte(selfId.Identifier))
+
+        nonce := make([]byte, 12)
+        copy(nonce[4:], "PV-Msg03")
+        encrypted := ci.Seal(nil, nonce, cTlv.bytes(), nil)
+
+        tlvOut := newTlvBuffer()
+        tlvOut.writeByte(typeState, pairStateVerifyRequest)
+        tlvOut.writeData(typeEncryptedData, encrypted)
+
+        pd := pairingData{
+                data:            tlvOut.bytes(),
+                kind:            "verifyManualPairing",
+                startNewSession: false,
+        }
+
+        err = t.controlChannel.writeEvent(&amp;pd)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">var responseEvent pairingData
+        err = t.controlChannel.readEvent(&amp;responseEvent)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">errRes, err := tlvReader(responseEvent.data).readCoalesced(typeError)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov0" title="0">if len(errRes) &gt; 0 </span><span class="cov0" title="0">{
+                log.Debug("Send pair verify failed event")
+                err := t.controlChannel.writeEvent(pairVerifyFailed{})
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov0" title="0">return nil, tlvError(errRes[0])</span>
+        }
+
+        <span class="cov0" title="0">err = t.setupCiphers(sharedSecret)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">return sharedSecret, nil</span>
+}
+
+type tunnelListener struct {
+        PrivateKey      *rsa.PrivateKey
+        DevicePublicKey interface{}
+        TunnelPort      uint64
+}
+
+type tunnelParameters struct {
+        ServerAddress    string
+        ServerRSDPort    uint64
+        ClientParameters struct {
+                Address string
+                Netmask string
+                Mtu     uint64
+        }
+}
+
+func (t *tunnelService) setupSessionKey(ctx context.Context) ([]byte, error) <span class="cov0" title="0">{
+        devicePublicKey, deviceSalt, err := t.readDeviceKey(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("setupSessionKey: failed to read device public key and salt value: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">srp, err := newSrpInfo(deviceSalt, devicePublicKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("setupSessionKey: failed to setup SRP: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">proofTlv := newTlvBuffer()
+        proofTlv.writeByte(typeState, pairStateVerifyRequest)
+        proofTlv.writeData(typePublicKey, srp.ClientPublic)
+        proofTlv.writeData(typeProof, srp.ClientProof)
+
+        err = t.controlChannel.writeEvent(&amp;pairingData{
+                data: proofTlv.bytes(),
+                kind: "setupManualPairing",
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("setupSessionKey: failed to send SRP proof: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">var proofPairingData pairingData
+        err = t.controlChannel.readEvent(&amp;proofPairingData)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("setupSessionKey: failed to read device SRP proof: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">serverProof, err := tlvReader(proofPairingData.data).readCoalesced(typeProof)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("setupSessionKey: failed to parse device proof: %w", err)
+        }</span>
+        <span class="cov0" title="0">verified := srp.verifyServerProof(serverProof)
+        if !verified </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("setupSessionKey: could not verify server proof")
+        }</span>
+        <span class="cov0" title="0">return srp.SessionKey, nil</span>
+}
+
+func (t *tunnelService) exchangeDeviceInfo(sessionKey []byte) error <span class="cov0" title="0">{
+        hkdfPairSetup := hkdf.New(sha512.New, sessionKey, []byte("Pair-Setup-Controller-Sign-Salt"), []byte("Pair-Setup-Controller-Sign-Info"))
+        buf := bytes.NewBuffer(nil)
+        // Write on bytes.Buffer never returns an error
+        _, _ = io.CopyN(buf, hkdfPairSetup, 32)
+        _, _ = buf.WriteString(t.pairRecords.selfId.Identifier)
+        _, _ = buf.Write(t.pairRecords.selfId.publicKey())
+
+        signature := ed25519.Sign(t.pairRecords.selfId.privateKey(), buf.Bytes())
+
+        // this represents the device info of this host that is stored on the device on a successful pairing.
+        // The only relevant field is 'accountID' as it's used earlier in the pairing process already.
+        // Everything else can be random data and is not needed later in any communication.
+        deviceInfo, err := opack.Encode(map[string]interface{}{
+                "accountID":                   t.pairRecords.selfId.Identifier,
+                "altIRK":                      []byte{0x5e, 0xca, 0x81, 0x91, 0x92, 0x02, 0x82, 0x00, 0x11, 0x22, 0x33, 0x44, 0xbb, 0xf2, 0x4a, 0xc8},
+                "btAddr":                      "FF:DD:99:66:BB:AA",
+                "mac":                         []byte{0xff, 0x44, 0x88, 0x66, 0x33, 0x99},
+                "model":                       "go-ios",
+                "name":                        "host-name",
+                "remotepairing_serial_number": "remote-serial",
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">deviceInfoTlv := newTlvBuffer()
+        deviceInfoTlv.writeData(typeSignature, signature)
+        deviceInfoTlv.writeData(typePublicKey, t.pairRecords.selfId.publicKey())
+        deviceInfoTlv.writeData(typeIdentifier, []byte(t.pairRecords.selfId.Identifier))
+        deviceInfoTlv.writeData(typeInfo, deviceInfo)
+
+        sessionKeyBuf := bytes.NewBuffer(nil)
+        _, err = io.CopyN(sessionKeyBuf, hkdf.New(sha512.New, sessionKey, []byte("Pair-Setup-Encrypt-Salt"), []byte("Pair-Setup-Encrypt-Info")), 32)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">setupKey := sessionKeyBuf.Bytes()
+
+        cipher, err := chacha20poly1305.New(setupKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">nonce := make([]byte, cipher.NonceSize())
+        copy(nonce[4:], "PS-Msg05")
+        x := cipher.Seal(nil, nonce, deviceInfoTlv.bytes(), nil)
+
+        encryptedTlv := newTlvBuffer()
+        encryptedTlv.writeByte(typeState, 0x05)
+        encryptedTlv.writeData(typeEncryptedData, x)
+
+        err = t.controlChannel.writeEvent(&amp;pairingData{
+                data:        encryptedTlv.bytes(),
+                kind:        "setupManualPairing",
+                sendingHost: "SL-1876",
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">var encRes pairingData
+        err = t.controlChannel.readEvent(&amp;encRes)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">encrData, err := tlvReader(encRes.data).readCoalesced(typeEncryptedData)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">copy(nonce[4:], "PS-Msg06")
+        // the device info response from the device is not needed. we just make sure that there's no error decrypting it
+        // TODO: decode the opack encoded data and persist it using the PairRecordManager.StoreDeviceInfo method
+        _, err = cipher.Open(nil, nonce, encrData, nil)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file16" style="display: none">package tunnel
+
+import (
+        "fmt"
+
+        plist "howett.net/plist"
+)
+
+// ToPlist converts a given struct to a Plist using the
+// github.com/DHowett/go-plist library. Make sure your struct is exported.
+// It returns a string containing the plist.
+func ToPlist(data interface{}) string <span class="cov0" title="0">{
+        return string(ToPlistBytes(data))
+}</span>
+
+// ToPlistBytes converts a given struct to a Plist using the
+// github.com/DHowett/go-plist library. Make sure your struct is exported.
+// It returns a byte slice containing the plist.
+func ToPlistBytes(data interface{}) []byte <span class="cov0" title="0">{
+        bytes, err := plist.Marshal(data, plist.XMLFormat)
+        if err != nil </span><span class="cov0" title="0">{
+                // this should not happen
+                panic(fmt.Sprintf("Failed converting to plist %v error:%v", data, err))</span>
+        }
+        <span class="cov0" title="0">return bytes</span>
+}
+</pre>
+		
+		<pre class="file" id="file17" style="display: none">package xpc
+
+import (
+        "bytes"
+        "encoding/binary"
+        "fmt"
+        "io"
+        "math"
+        "reflect"
+        "strings"
+        "time"
+
+        "github.com/google/uuid"
+)
+
+const bodyVersion = uint32(0x00000005)
+
+const (
+        wrapperMagic = uint32(0x29b00b92)
+        objectMagic  = uint32(0x42133742)
+)
+
+type xpcType uint32
+
+// TODO: there are more types available and need to be added still when observed
+const (
+        nullType         = xpcType(0x00001000)
+        boolType         = xpcType(0x00002000)
+        int64Type        = xpcType(0x00003000)
+        uint64Type       = xpcType(0x00004000)
+        doubleType       = xpcType(0x00005000)
+        dateType         = xpcType(0x00007000)
+        dataType         = xpcType(0x00008000)
+        stringType       = xpcType(0x00009000)
+        uuidType         = xpcType(0x0000a000)
+        arrayType        = xpcType(0x0000e000)
+        dictionaryType   = xpcType(0x0000f000)
+        fileTransferType = xpcType(0x0001a000)
+)
+
+const (
+        AlwaysSetFlag        = uint32(0x00000001)
+        DataFlag             = uint32(0x00000100)
+        HeartbeatRequestFlag = uint32(0x00010000)
+        HeartbeatReplyFlag   = uint32(0x00020000)
+        FileOpenFlag         = uint32(0x00100000)
+        InitHandshakeFlag    = uint32(0x00400000)
+)
+
+type wrapperHeader struct {
+        Flags   uint32
+        BodyLen uint64
+        MsgId   uint64
+}
+
+type Message struct {
+        Flags uint32
+        Body  map[string]interface{}
+        Id    uint64
+}
+
+func (m Message) IsFileOpen() bool <span class="cov8" title="1">{
+        return m.Flags&amp;FileOpenFlag &gt; 0
+}</span>
+
+type FileTransfer struct {
+        MsgId        uint64
+        TransferSize uint64
+}
+
+// DecodeMessage expects a full RemoteXPC message and decodes the message body into a map
+func DecodeMessage(r io.Reader) (Message, error) <span class="cov8" title="1">{
+        var magic uint32
+        if err := binary.Read(r, binary.LittleEndian, &amp;magic); err != nil </span><span class="cov0" title="0">{
+                return Message{}, fmt.Errorf("DecodeMessage: failed to read magic number: %w", err)
+        }</span>
+        <span class="cov8" title="1">if magic != wrapperMagic </span><span class="cov8" title="1">{
+                return Message{}, fmt.Errorf("DecodeMessage: wrong magic number 0x%x", magic)
+        }</span>
+        <span class="cov8" title="1">wrapper, err := decodeWrapper(r)
+        if err != nil </span><span class="cov0" title="0">{
+                return Message{}, fmt.Errorf("DecodeMessage: failed to decode wrapper: %w", err)
+        }</span>
+        <span class="cov8" title="1">return wrapper, nil</span>
+}
+
+// EncodeMessage creates a RemoteXPC message encoded with the body and flags provided
+func EncodeMessage(w io.Writer, message Message) error <span class="cov8" title="1">{
+        if message.Body == nil </span><span class="cov8" title="1">{
+                wrapper := struct {
+                        magic uint32
+                        h     wrapperHeader
+                }{
+                        magic: wrapperMagic,
+                        h: wrapperHeader{
+                                Flags:   message.Flags,
+                                BodyLen: 0,
+                                MsgId:   message.Id,
+                        },
+                }
+
+                err := binary.Write(w, binary.LittleEndian, wrapper)
+                if err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("EncodeMessage: failed to write empty message: %w", err)
+                }</span>
+                <span class="cov8" title="1">return nil</span>
+        }
+        <span class="cov8" title="1">buf := bytes.NewBuffer(nil)
+        err := encodeDictionary(buf, message.Body)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("EncodeMessage: failed to encode dictionary: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">wrapper := struct {
+                magic uint32
+                h     wrapperHeader
+                body  struct {
+                        magic   uint32
+                        version uint32
+                }
+        }{
+                magic: wrapperMagic,
+                h: wrapperHeader{
+                        Flags:   message.Flags,
+                        BodyLen: uint64(buf.Len() + 8),
+                        MsgId:   message.Id,
+                },
+                body: struct {
+                        magic   uint32
+                        version uint32
+                }{
+                        magic:   objectMagic,
+                        version: bodyVersion,
+                },
+        }
+
+        err = binary.Write(w, binary.LittleEndian, wrapper)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("EncodeMessage: failed to write xpc wrapper: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">_, err = io.Copy(w, buf)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("EncodeMessage: failed to write message body: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+
+}
+
+func decodeWrapper(r io.Reader) (Message, error) <span class="cov8" title="1">{
+        var h wrapperHeader
+        err := binary.Read(r, binary.LittleEndian, &amp;h)
+        if err != nil </span><span class="cov0" title="0">{
+                return Message{}, fmt.Errorf("decodeWrapper: failed to decode header wrapper: %w", err)
+        }</span>
+        <span class="cov8" title="1">if h.BodyLen == 0 </span><span class="cov8" title="1">{
+                return Message{
+                        Flags: h.Flags,
+                }, nil
+        }</span>
+        <span class="cov8" title="1">body, err := decodeBody(r, h)
+        if err != nil </span><span class="cov0" title="0">{
+                return Message{}, fmt.Errorf("decodeWrapper: failed to decode body: %w", err)
+        }</span>
+        <span class="cov8" title="1">return Message{
+                Flags: h.Flags,
+                Body:  body,
+        }, nil</span>
+}
+
+func decodeBody(r io.Reader, h wrapperHeader) (map[string]interface{}, error) <span class="cov8" title="1">{
+        bodyHeader := struct {
+                Magic   uint32
+                Version uint32
+        }{}
+        if err := binary.Read(r, binary.LittleEndian, &amp;bodyHeader); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeBody: failed to decode header: %w", err)
+        }</span>
+        <span class="cov8" title="1">if bodyHeader.Magic != objectMagic </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeBody: invalid object magic number 0x%x", bodyHeader.Magic)
+        }</span>
+        <span class="cov8" title="1">if bodyHeader.Version != bodyVersion </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeBody: expected version 0x%x but got 0x%x", bodyVersion, bodyHeader.Version)
+        }</span>
+        <span class="cov8" title="1">bodyPayloadLength := h.BodyLen - 8
+        body := make([]byte, bodyPayloadLength)
+        n, err := r.Read(body)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeBody:: failed to read body data: %w", err)
+        }</span>
+        <span class="cov8" title="1">if uint64(n) != bodyPayloadLength </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeBody: could not read full body. only %d instead of %d were read", n, bodyPayloadLength)
+        }</span>
+        <span class="cov8" title="1">bodyBuf := bytes.NewReader(body)
+        res, err := decodeObject(bodyBuf)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeBody: failed to decode body: %w", err)
+        }</span>
+        <span class="cov8" title="1">return res.(map[string]interface{}), nil</span>
+}
+
+func decodeObject(r io.Reader) (interface{}, error) <span class="cov8" title="1">{
+        var t xpcType
+        err := binary.Read(r, binary.LittleEndian, &amp;t)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeObject: could not read type: %w", err)
+        }</span>
+        <span class="cov8" title="1">switch t </span>{
+        case nullType:<span class="cov8" title="1">
+                return nil, nil</span>
+        case boolType:<span class="cov8" title="1">
+                return decodeBool(r)</span>
+        case int64Type:<span class="cov8" title="1">
+                return decodeInt64(r)</span>
+        case uint64Type:<span class="cov0" title="0">
+                return decodeUint64(r)</span>
+        case doubleType:<span class="cov0" title="0">
+                return decodeDouble(r)</span>
+        case dateType:<span class="cov0" title="0">
+                return decodeDate(r)</span>
+        case dataType:<span class="cov0" title="0">
+                return decodeData(r)</span>
+        case stringType:<span class="cov8" title="1">
+                return decodeString(r)</span>
+        case uuidType:<span class="cov0" title="0">
+                return decodeUuid(r)</span>
+        case arrayType:<span class="cov8" title="1">
+                return decodeArray(r)</span>
+        case dictionaryType:<span class="cov8" title="1">
+                return decodeDictionary(r)</span>
+        case fileTransferType:<span class="cov0" title="0">
+                return decodeFileTransfer(r)</span>
+        default:<span class="cov8" title="1">
+                return nil, fmt.Errorf("decodeObject: can't handle unknown type 0x%08x", t)</span>
+        }
+}
+
+func decodeUuid(r io.Reader) (uuid.UUID, error) <span class="cov8" title="1">{
+        b := make([]byte, 16)
+        _, err := r.Read(b)
+        if err != nil </span><span class="cov0" title="0">{
+                return [16]byte{}, fmt.Errorf("decodeUuid: failed to read data: %w", err)
+        }</span>
+        <span class="cov8" title="1">u, err := uuid.FromBytes(b)
+        if err != nil </span><span class="cov0" title="0">{
+                return [16]byte{}, fmt.Errorf("decodeUuid: failed to parse UUID: %w", err)
+        }</span>
+        <span class="cov8" title="1">return u, nil</span>
+}
+
+func decodeFileTransfer(r io.Reader) (FileTransfer, error) <span class="cov0" title="0">{
+        header := struct {
+                MsgId uint64 // always 1
+        }{}
+        err := binary.Read(r, binary.LittleEndian, &amp;header)
+        if err != nil </span><span class="cov0" title="0">{
+                return FileTransfer{}, fmt.Errorf("decodeFileTransfer: failed to read data: %w", err)
+        }</span>
+        <span class="cov0" title="0">d, err := decodeObject(r)
+        if err != nil </span><span class="cov0" title="0">{
+                return FileTransfer{}, fmt.Errorf("decodeFileTransfer: failed to decode object: %w", err)
+        }</span>
+        <span class="cov0" title="0">if dict, ok := d.(map[string]interface{}); ok </span><span class="cov0" title="0">{
+                // the transfer length is always stored in a property 's'
+                if transferLen, ok := dict["s"].(uint64); ok </span><span class="cov0" title="0">{
+                        return FileTransfer{
+                                MsgId:        header.MsgId,
+                                TransferSize: transferLen,
+                        }, nil
+                }</span> else<span class="cov0" title="0"> {
+                        return FileTransfer{}, fmt.Errorf("decodeFileTransfer: expected uint64 for transfer length")
+                }</span>
+        } else<span class="cov0" title="0"> {
+                return FileTransfer{}, fmt.Errorf("decodeFileTransfer: expected a dictionary but got %T", d)
+        }</span>
+}
+
+func decodeDictionary(r io.Reader) (map[string]interface{}, error) <span class="cov8" title="1">{
+        var l, numEntries uint32
+        err := binary.Read(r, binary.LittleEndian, &amp;l)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeDictionary: failed to read data: %w", err)
+        }</span>
+        <span class="cov8" title="1">err = binary.Read(r, binary.LittleEndian, &amp;numEntries)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeDictionary: failed to read number of entries: %w", err)
+        }</span>
+        <span class="cov8" title="1">dict := make(map[string]interface{})
+        for i := uint32(0); i &lt; numEntries; i++ </span><span class="cov8" title="1">{
+                key, err := readDictionaryKey(r)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("decodeDictionary: failed to read dictionary key: %w", err)
+                }</span>
+                <span class="cov8" title="1">dict[key], err = decodeObject(r)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("decodeDictionary: failed to decode object for key '%s': %w", key, err)
+                }</span>
+        }
+        <span class="cov8" title="1">return dict, nil</span>
+}
+
+func readDictionaryKey(r io.Reader) (string, error) <span class="cov8" title="1">{
+        var b strings.Builder
+        buf := make([]byte, 1)
+        for </span><span class="cov8" title="1">{
+                _, err := r.Read(buf)
+                if err != nil </span><span class="cov0" title="0">{
+                        return "", fmt.Errorf("readDictionaryKey: failed to read character: %w", err)
+                }</span>
+                <span class="cov8" title="1">if buf[0] == 0 </span><span class="cov8" title="1">{
+                        s := b.String()
+                        toSkip := calcPadding(len(s) + 1)
+                        _, err := io.CopyN(io.Discard, r, toSkip)
+                        if err != nil </span><span class="cov0" title="0">{
+                                return "", fmt.Errorf("readDictionaryKey: failed to discard padding: %w", err)
+                        }</span>
+                        <span class="cov8" title="1">return s, nil</span>
+                }
+                <span class="cov8" title="1">b.Write(buf)</span>
+        }
+}
+
+func decodeArray(r io.Reader) ([]interface{}, error) <span class="cov8" title="1">{
+        var l, numEntries uint32
+        err := binary.Read(r, binary.LittleEndian, &amp;l)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeArray: failed to read payload length: %w", err)
+        }</span>
+        <span class="cov8" title="1">err = binary.Read(r, binary.LittleEndian, &amp;numEntries)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeArray: failed to read number of entries: %w", err)
+        }</span>
+        <span class="cov8" title="1">arr := make([]interface{}, numEntries)
+        for i := uint32(0); i &lt; numEntries; i++ </span><span class="cov8" title="1">{
+                arr[i], err = decodeObject(r)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("decodeArray: failed to decode object at index %d: %w", i, err)
+                }</span>
+        }
+        <span class="cov8" title="1">return arr, nil</span>
+}
+
+func decodeString(r io.Reader) (string, error) <span class="cov8" title="1">{
+        var l uint32
+        err := binary.Read(r, binary.LittleEndian, &amp;l)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", fmt.Errorf("decodeString: failed to read string length: %w", err)
+        }</span>
+        <span class="cov8" title="1">s := make([]byte, l)
+        _, err = r.Read(s)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", fmt.Errorf("decodeString: failed to read string: %w", err)
+        }</span>
+        <span class="cov8" title="1">res := strings.Trim(string(s), "\000")
+        toSkip := calcPadding(int(l))
+        _, err = io.CopyN(io.Discard, r, toSkip)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", fmt.Errorf("decodeString: faile to skip padding bytes: %w", err)
+        }</span>
+        <span class="cov8" title="1">return res, nil</span>
+}
+
+func decodeData(r io.Reader) ([]byte, error) <span class="cov8" title="1">{
+        var l uint32
+        err := binary.Read(r, binary.LittleEndian, &amp;l)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeData: failed to read payload length: %w", err)
+        }</span>
+        <span class="cov8" title="1">b := make([]byte, l)
+        _, err = r.Read(b)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decodeData: failed to read payload: %w", err)
+        }</span>
+        <span class="cov8" title="1">toSkip := calcPadding(int(l))
+        _, _ = io.CopyN(io.Discard, r, toSkip)
+        return b, nil</span>
+}
+
+func decodeDouble(r io.Reader) (interface{}, error) <span class="cov8" title="1">{
+        var d float64
+        err := binary.Read(r, binary.LittleEndian, &amp;d)
+        if err != nil </span><span class="cov0" title="0">{
+                return 0, fmt.Errorf("decodeDouble: failed to read data: %w", err)
+        }</span>
+        <span class="cov8" title="1">return d, nil</span>
+}
+
+func decodeUint64(r io.Reader) (uint64, error) <span class="cov8" title="1">{
+        var i uint64
+        err := binary.Read(r, binary.LittleEndian, &amp;i)
+        if err != nil </span><span class="cov0" title="0">{
+                return 0, fmt.Errorf("decodeUint64: failed to read data: %w", err)
+        }</span>
+        <span class="cov8" title="1">return i, nil</span>
+}
+
+func decodeInt64(r io.Reader) (int64, error) <span class="cov8" title="1">{
+        var i int64
+        err := binary.Read(r, binary.LittleEndian, &amp;i)
+        if err != nil </span><span class="cov0" title="0">{
+                return 0, fmt.Errorf("decodeInt64: failed to read data: %w", err)
+        }</span>
+        <span class="cov8" title="1">return i, nil</span>
+}
+
+func decodeBool(r io.Reader) (bool, error) <span class="cov8" title="1">{
+        var b bool
+        err := binary.Read(r, binary.LittleEndian, &amp;b)
+        if err != nil </span><span class="cov0" title="0">{
+                return false, fmt.Errorf("decodeBool: failed to read data: %w", err)
+        }</span>
+        <span class="cov8" title="1">_, _ = io.CopyN(io.Discard, r, 3)
+        return b, nil</span>
+}
+
+func decodeDate(r io.Reader) (time.Time, error) <span class="cov8" title="1">{
+        var i int64
+        err := binary.Read(r, binary.LittleEndian, &amp;i)
+        if err != nil </span><span class="cov0" title="0">{
+                return time.Time{}, fmt.Errorf("decodeDate: failed to read date payload: %w", err)
+        }</span>
+        <span class="cov8" title="1">t := time.Unix(0, i)
+        return t, nil</span>
+}
+
+func calcPadding(l int) int64 <span class="cov8" title="1">{
+        c := int(math.Ceil(float64(l) / 4.0))
+        return int64(c*4 - l)
+}</span>
+
+func encodeDictionary(w io.Writer, v map[string]interface{}) error <span class="cov8" title="1">{
+        buf := bytes.NewBuffer(nil)
+
+        err := binary.Write(buf, binary.LittleEndian, uint32(len(v)))
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeDictionary: failed to write number of dictionary entries: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">for k, e := range v </span><span class="cov8" title="1">{
+                err := encodeDictionaryKey(buf, k)
+                if err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("encodeDictionary: failed to encode dictionary key '%s': %w", k, err)
+                }</span>
+                <span class="cov8" title="1">err = encodeObject(buf, e)
+                if err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("encodeDictionary: failed to encode object: %w", err)
+                }</span>
+        }
+
+        <span class="cov8" title="1">err = binary.Write(w, binary.LittleEndian, dictionaryType)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeDictionary: failed to write dictionary type: %w", err)
+        }</span>
+        <span class="cov8" title="1">err = binary.Write(w, binary.LittleEndian, uint32(buf.Len()))
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeDictionary: failed to write payload length: %w", err)
+        }</span>
+        <span class="cov8" title="1">_, err = w.Write(buf.Bytes())
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeDictionary: failed to write ")
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeObject(w io.Writer, e interface{}) error <span class="cov8" title="1">{
+        if e == nil </span><span class="cov8" title="1">{
+                if err := binary.Write(w, binary.LittleEndian, nullType); err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("encodeObject: failed to encode null objecdt: %w", err)
+                }</span>
+                <span class="cov8" title="1">return nil</span>
+        }
+        <span class="cov8" title="1">if v := reflect.ValueOf(e); v.Kind() == reflect.Slice </span><span class="cov8" title="1">{
+                if b, ok := e.([]byte); ok </span><span class="cov0" title="0">{
+                        return encodeData(w, b)
+                }</span>
+                <span class="cov8" title="1">r := make([]interface{}, v.Len())
+                for i := 0; i &lt; v.Len(); i++ </span><span class="cov8" title="1">{
+                        r[i] = v.Index(i).Interface()
+                }</span>
+                <span class="cov8" title="1">if err := encodeArray(w, r); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">return nil</span>
+        }
+        <span class="cov8" title="1">switch t := e.(type) </span>{
+        case bool:<span class="cov8" title="1">
+                if err := encodeBool(w, e.(bool)); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        case int64:<span class="cov8" title="1">
+                if err := encodeInt64(w, e.(int64)); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        case uint64:<span class="cov0" title="0">
+                if err := encodeUint64(w, e.(uint64)); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        case float64:<span class="cov0" title="0">
+                if err := encodeDouble(w, e.(float64)); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        case string:<span class="cov8" title="1">
+                if err := encodeString(w, e.(string)); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        case uuid.UUID:<span class="cov0" title="0">
+                if err := encodeUuid(w, e.(uuid.UUID)); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        case time.Time:<span class="cov0" title="0">
+                if err := encodeDate(w, e.(time.Time)); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        case map[string]interface{}:<span class="cov8" title="1">
+                if err := encodeDictionary(w, e.(map[string]interface{})); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        default:<span class="cov0" title="0">
+                return fmt.Errorf("can not encode type %v", t)</span>
+        }
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeUuid(w io.Writer, u uuid.UUID) error <span class="cov8" title="1">{
+        out := struct {
+                t xpcType
+                u uuid.UUID
+        }{uuidType, u}
+        err := binary.Write(w, binary.LittleEndian, out)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeUuid: failed to write UUID payload: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeArray(w io.Writer, slice []interface{}) error <span class="cov8" title="1">{
+        buf := bytes.NewBuffer(nil)
+        for i, e := range slice </span><span class="cov8" title="1">{
+                if err := encodeObject(buf, e); err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("encodeArray: failed to encode array object at index %d: %w", i, err)
+                }</span>
+        }
+
+        <span class="cov8" title="1">header := struct {
+                t          xpcType
+                l          uint32
+                numObjects uint32
+        }{arrayType, uint32(buf.Len()), uint32(len(slice))}
+        if err := binary.Write(w, binary.LittleEndian, header); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeArray: failed to write array header: %w", err)
+        }</span>
+        <span class="cov8" title="1">if _, err := io.Copy(w, buf); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeArray: failed to copy array payload: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeString(w io.Writer, s string) error <span class="cov8" title="1">{
+        header := struct {
+                t xpcType
+                l uint32
+        }{stringType, uint32(len(s) + 1)}
+        err := binary.Write(w, binary.LittleEndian, header)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeString: failed to write header: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">toPad := calcPadding(int(header.l))
+        padded := make([]byte, len(s)+int(toPad)+1)
+        copy(padded, s)
+        _, err = w.Write(padded)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeString: failed to write string payload: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeData(w io.Writer, b []byte) error <span class="cov8" title="1">{
+        header := struct {
+                t xpcType
+                l uint32
+        }{dataType, uint32(len(b))}
+        err := binary.Write(w, binary.LittleEndian, header)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeData: failed to write data length: %w", err)
+        }</span>
+        <span class="cov8" title="1">_, err = w.Write(b)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeData: failed to write data: %w", err)
+        }</span>
+        <span class="cov8" title="1">toPad := calcPadding(int(header.l))
+        _, err = w.Write(make([]byte, toPad))
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeData: failed to write padding: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeUint64(w io.Writer, i uint64) error <span class="cov8" title="1">{
+        out := struct {
+                t xpcType
+                i uint64
+        }{uint64Type, i}
+        err := binary.Write(w, binary.LittleEndian, out)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeUint64: failed to write data: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeInt64(w io.Writer, i int64) error <span class="cov8" title="1">{
+        out := struct {
+                t xpcType
+                i int64
+        }{int64Type, i}
+        err := binary.Write(w, binary.LittleEndian, out)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeInt64: failed to write data: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeDouble(w io.Writer, d float64) error <span class="cov8" title="1">{
+        out := struct {
+                t xpcType
+                d float64
+        }{doubleType, d}
+        err := binary.Write(w, binary.LittleEndian, out)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeDouble: failed to write data: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeBool(w io.Writer, b bool) error <span class="cov8" title="1">{
+        out := struct {
+                t   xpcType
+                b   bool
+                pad [3]byte
+        }{
+                t: boolType,
+                b: b,
+        }
+        err := binary.Write(w, binary.LittleEndian, out)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeBool: failed to write data: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeDate(w io.Writer, t time.Time) error <span class="cov8" title="1">{
+        out := struct {
+                t xpcType
+                i int64
+        }{dateType, t.UnixNano()}
+        err := binary.Write(w, binary.LittleEndian, out)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeDate: failed to write data: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func encodeDictionaryKey(w io.Writer, k string) error <span class="cov8" title="1">{
+        strLen := len(k) + 1
+        toPad := calcPadding(strLen)
+        content := make([]byte, strLen+int(toPad))
+        copy(content, k)
+        _, err := w.Write(content)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("encodeDictionaryKey: failed to write data: %w", err)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file18" style="display: none">// Package xpc contains a connection stuct and the codec for the xpc protocol.
+// The xpc protocol is used to communicate with services on iOS17+ devices.
+package xpc
+
+import (
+        "fmt"
+        "io"
+
+        "golang.org/x/net/http2"
+)
+
+// Connection represents a http2 based connection to an XPC service on an iOS17 device.
+type Connection struct {
+        connectionCloser io.Closer
+        framer           *http2.Framer
+        msgId            uint64
+        clientServer     io.ReadWriter
+        serverClient     io.ReadWriter
+}
+
+// New creates a new connection to an XPC service on an iOS17 device.
+func New(clientServer io.ReadWriter, serverClient io.ReadWriter, closer io.Closer) (*Connection, error) <span class="cov0" title="0">{
+        return &amp;Connection{
+                connectionCloser: closer,
+                msgId:            1,
+                clientServer:     clientServer,
+                serverClient:     serverClient,
+        }, nil
+}</span>
+
+func (c *Connection) ReceiveOnServerClientStream() (map[string]interface{}, error) <span class="cov0" title="0">{
+        msg, err := DecodeMessage(c.serverClient)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("ReceiveOnServerClientStream: %w", err)
+        }</span>
+        <span class="cov0" title="0">return msg.Body, nil</span>
+}
+
+func (c *Connection) ReceiveOnClientServerStream() (map[string]interface{}, error) <span class="cov0" title="0">{
+        return c.receiveOnStream(c.clientServer)
+}</span>
+
+func (c *Connection) receiveOnStream(r io.Reader) (map[string]interface{}, error) <span class="cov0" title="0">{
+        msg, err := DecodeMessage(r)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("receiveOnStream: %w", err)
+        }</span>
+        <span class="cov0" title="0">return msg.Body, nil</span>
+}
+
+// Send sends the passed data as XPC message.
+// Additional flags can be passed via the flags argument (the default ones are AlwaysSetFlag and if data != nil DataFlag)
+func (c *Connection) Send(data map[string]interface{}, flags ...uint32) error <span class="cov0" title="0">{
+        f := AlwaysSetFlag
+        if data != nil </span><span class="cov0" title="0">{
+                f |= DataFlag
+        }</span>
+        <span class="cov0" title="0">for _, flag := range flags </span><span class="cov0" title="0">{
+                f |= flag
+        }</span>
+        <span class="cov0" title="0">msg := Message{
+                Flags: f,
+                Body:  data,
+                Id:    c.msgId,
+        }
+        return EncodeMessage(c.clientServer, msg)</span>
+}
+
+func (c *Connection) Close() error <span class="cov0" title="0">{
+        return c.connectionCloser.Close()
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
