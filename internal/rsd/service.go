@@ -9,6 +9,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// discoveryInfo tracks an active discovery for an interface
+type discoveryInfo struct {
+	id     uint64
+	cancel context.CancelFunc
+}
+
 type Service struct {
 	// NetMon subscription
 	ifCh    <-chan netmon.InterfaceEvent
@@ -23,13 +29,20 @@ type Service struct {
 	subs   map[int]*runtime.SubQueue[RsdServiceEvent]
 	nextID int
 
+	// Discovery tracking: one discovery per interface, cancellable
+	discoveriesMu   sync.Mutex
+	discoveries     map[string]discoveryInfo // interface name -> discovery info
+	nextDiscoveryID uint64
+	wg              sync.WaitGroup // Track goroutines for clean shutdown
+
 	closed bool
 }
 
 func NewService() *Service {
 	return &Service{
-		rsdMap: make(map[string]RsdService),
-		subs:   make(map[int]*runtime.SubQueue[RsdServiceEvent]),
+		rsdMap:      make(map[string]RsdService),
+		subs:        make(map[int]*runtime.SubQueue[RsdServiceEvent]),
+		discoveries: make(map[string]discoveryInfo),
 	}
 }
 
@@ -110,6 +123,18 @@ func (s *Service) Close() error {
 	if s.ifUnsub != nil {
 		s.ifUnsub()
 	}
+
+	// Cancel all in-progress discoveries
+	s.discoveriesMu.Lock()
+	for _, info := range s.discoveries {
+		info.cancel()
+	}
+	s.discoveries = make(map[string]discoveryInfo)
+	s.discoveriesMu.Unlock()
+
+	// Wait for discovery goroutines to finish
+	s.wg.Wait()
+
 	s.subsMu.Lock()
 	defer s.subsMu.Unlock()
 	if s.closed {
@@ -126,9 +151,36 @@ func (s *Service) Close() error {
 func (s *Service) handleNetworkInterfaceEvent(ctx context.Context, ev netmon.InterfaceEvent) {
 	switch ev.Type {
 	case netmon.InterfaceAdded:
-		// Discover RSD endpoints on this interface
+		// Check if discovery already in progress for this interface
+		s.discoveriesMu.Lock()
+		if _, exists := s.discoveries[ev.InterfaceName]; exists {
+			// Discovery already in progress, skip
+			s.discoveriesMu.Unlock()
+			log.WithField("interface", ev.InterfaceName).Debug("Discovery already in progress, skipping")
+			return
+		}
+
+		// Create cancellable context for this discovery with a unique ID
+		discoverCtx, cancel := context.WithCancel(ctx)
+		s.nextDiscoveryID++
+		discoveryID := s.nextDiscoveryID
+		s.discoveries[ev.InterfaceName] = discoveryInfo{id: discoveryID, cancel: cancel}
+		s.discoveriesMu.Unlock()
+
+		// Track goroutine for clean shutdown
+		s.wg.Add(1)
 		go func() {
-			rsdService, err := FindRsdService(ctx, ev.InterfaceName)
+			defer s.wg.Done()
+			defer func() {
+				s.discoveriesMu.Lock()
+				// Only delete if this is still our discovery (not replaced by a newer one)
+				if info, exists := s.discoveries[ev.InterfaceName]; exists && info.id == discoveryID {
+					delete(s.discoveries, ev.InterfaceName)
+				}
+				s.discoveriesMu.Unlock()
+			}()
+
+			rsdService, err := FindRsdService(discoverCtx, ev.InterfaceName)
 			if err != nil {
 				log.WithField("interface", ev.InterfaceName).WithError(err).Trace("Stopped looking for an RSD service")
 				return
@@ -154,7 +206,15 @@ func (s *Service) handleNetworkInterfaceEvent(ctx context.Context, ev netmon.Int
 		}()
 
 	case netmon.InterfaceRemoved:
-		// Remove any tunnels associated with this interface
+		// Cancel any in-progress discovery for this interface
+		s.discoveriesMu.Lock()
+		if info, exists := s.discoveries[ev.InterfaceName]; exists {
+			info.cancel()
+			delete(s.discoveries, ev.InterfaceName)
+		}
+		s.discoveriesMu.Unlock()
+
+		// Remove any services associated with this interface
 		var removed []RsdService
 		s.mu.Lock()
 		for k, v := range s.rsdMap {

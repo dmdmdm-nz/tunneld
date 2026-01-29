@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -30,6 +31,10 @@ type Service struct {
 
 	tunnelsMutex sync.RWMutex
 	tunnels      map[string]*tunnel.Tunnel
+
+	// Track in-progress tunnel creations to prevent duplicates
+	tunnelCreationsMutex sync.Mutex
+	tunnelCreations      map[string]context.CancelFunc // udid -> cancel func
 
 	devicesReadyMutex sync.Mutex
 	devicesReady      map[string]bool
@@ -60,6 +65,7 @@ func NewService(host string, port int, autoCreateTunnels bool) *Service {
 		pm:                &pm,
 		tn:                tn,
 		tunnels:           make(map[string]*tunnel.Tunnel),
+		tunnelCreations:   make(map[string]context.CancelFunc),
 		tunnelsStatus:     make(map[string]tunnel.TunnelStatus),
 		pairedStatus:      make(map[string]bool),
 		devicesReady:      make(map[string]bool),
@@ -129,14 +135,39 @@ func (s *Service) Start(ctx context.Context) error {
 			case rsd.RsdServiceAdded:
 				s.setRsd(ev.Info)
 				if s.autoCreateTunnels {
-					go func() {
-						s.runAutoTunnel(ctx, ev)
-					}()
+					// Check if tunnel creation is already in progress for this device
+					s.tunnelCreationsMutex.Lock()
+					if _, exists := s.tunnelCreations[ev.Info.Udid]; exists {
+						s.tunnelCreationsMutex.Unlock()
+						log.WithField("udid", ev.Info.Udid).Debug("Tunnel creation already in progress, skipping")
+						continue
+					}
+					// Create a cancellable context for this tunnel creation
+					creationCtx, cancel := context.WithCancel(ctx)
+					s.tunnelCreations[ev.Info.Udid] = cancel
+					s.tunnelCreationsMutex.Unlock()
+
+					go func(info rsd.RsdService) {
+						defer func() {
+							s.tunnelCreationsMutex.Lock()
+							delete(s.tunnelCreations, info.Udid)
+							s.tunnelCreationsMutex.Unlock()
+						}()
+						s.runAutoTunnel(creationCtx, rsd.RsdServiceEvent{Type: ev.Type, Info: info})
+					}(ev.Info)
 				} else {
 					s.setDeviceReady(ev.Info.Udid, false)
 					s.setPaired(ev.Info.Udid, false)
 				}
 			case rsd.RsdServiceRemoved:
+				// Cancel any in-progress tunnel creation for this device
+				s.tunnelCreationsMutex.Lock()
+				if cancel, exists := s.tunnelCreations[ev.Info.Udid]; exists {
+					cancel()
+					delete(s.tunnelCreations, ev.Info.Udid)
+				}
+				s.tunnelCreationsMutex.Unlock()
+
 				s.removeRsd(ev.Info.Udid)
 				s.removeTunnel(ev.Info)
 			}
@@ -148,6 +179,15 @@ func (s *Service) Close() error {
 	if s.rsdUnsub != nil {
 		s.rsdUnsub()
 	}
+
+	// Cancel all in-progress tunnel creations
+	s.tunnelCreationsMutex.Lock()
+	for udid, cancel := range s.tunnelCreations {
+		log.WithField("udid", udid).Debug("Cancelling in-progress tunnel creation")
+		cancel()
+	}
+	s.tunnelCreations = make(map[string]context.CancelFunc)
+	s.tunnelCreationsMutex.Unlock()
 
 	s.tunnelsMutex.Lock()
 	defer s.tunnelsMutex.Unlock()
@@ -511,10 +551,19 @@ func (s *Service) createTunnel(ctx context.Context, info rsd.RsdService) (*tunne
 				}
 			}
 
-			log.WithFields(log.Fields{
-				"address": info.Address,
-				"udid":    info.Udid,
-			}).WithError(err).Error("Failed to connect to tunnel")
+			// Don't log context cancellation as an error (happens during shutdown)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+				strings.Contains(err.Error(), "context canceled") || strings.Contains(err.Error(), "context deadline exceeded") {
+				log.WithFields(log.Fields{
+					"address": info.Address,
+					"udid":    info.Udid,
+				}).Debug("Tunnel connection cancelled")
+			} else {
+				log.WithFields(log.Fields{
+					"address": info.Address,
+					"udid":    info.Udid,
+				}).WithError(err).Error("Failed to connect to tunnel")
+			}
 			return nil, err
 		}
 		break

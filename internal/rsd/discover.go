@@ -15,13 +15,17 @@ import (
 
 const RSD_PORT int = 58783
 
+// suspendRemotedFunc is the function used to suspend remoted during discovery.
+// It can be overridden in tests to verify cleanup behavior.
+var suspendRemotedFunc = tunnel.SuspendRemoted
+
 func FindRsdService(ctx context.Context, interfaceName string) (RsdService, error) {
 	log.WithField("interface", interfaceName).Debug("Searching for RSD service on interface")
 
 	const maxAttempts = 30
 	var lastErr error
 
-	resumeRemoted, err := tunnel.SuspendRemoted()
+	resumeRemoted, err := suspendRemotedFunc()
 	if err != nil {
 		log.WithField("interface", interfaceName).Error("Failed to suspend remoted:", err.Error())
 		return RsdService{}, fmt.Errorf("failed to suspend remoted: %w", err)
@@ -86,10 +90,10 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 		}(entries)
 
 		attemptCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		defer cancel()
 
 		select {
 		case svc := <-resultCh:
+			cancel()
 			browseCancel()
 			return svc, nil
 		case err := <-errCh:
@@ -100,11 +104,13 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 			browseCancel()
 			// Check if parent context was cancelled (shutdown) vs actual timeout
 			if ctx.Err() != nil {
+				cancel()
 				return RsdService{}, ctx.Err()
 			}
 			log.WithField("interface", interfaceName).Debug("Did not find an RSD service within the time out")
 			lastErr = errors.New("no RSD service found within timeout")
 		}
+		cancel()
 	}
 
 	if lastErr == nil {
