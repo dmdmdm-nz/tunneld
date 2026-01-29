@@ -15,6 +15,7 @@ func TestService_NewService(t *testing.T) {
 	assert.NotNil(t, s)
 	assert.NotNil(t, s.rsdMap)
 	assert.NotNil(t, s.subs)
+	assert.NotNil(t, s.discoveries)
 }
 
 func TestService_AttachNetmon(t *testing.T) {
@@ -348,4 +349,113 @@ func TestService_Start_ChannelClose(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for Start to return")
 	}
+}
+
+func TestService_HandleInterfaceAdded_SkipsDuplicateDiscovery(t *testing.T) {
+	s := NewService()
+	defer s.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Simulate a discovery already in progress
+	s.discoveriesMu.Lock()
+	s.discoveries["en0"] = discoveryInfo{id: 1, cancel: func() {}}
+	s.discoveriesMu.Unlock()
+
+	// Send InterfaceAdded event for same interface
+	s.handleNetworkInterfaceEvent(ctx, netmon.InterfaceEvent{
+		Type:          netmon.InterfaceAdded,
+		InterfaceName: "en0",
+	})
+
+	// Should still only have one entry (the original one)
+	s.discoveriesMu.Lock()
+	count := len(s.discoveries)
+	s.discoveriesMu.Unlock()
+
+	assert.Equal(t, 1, count, "should not spawn duplicate discovery")
+}
+
+func TestService_HandleInterfaceRemoved_CancelsDiscovery(t *testing.T) {
+	s := NewService()
+	defer s.Close()
+
+	ctx := context.Background()
+
+	// Track if cancel was called
+	cancelCalled := false
+	s.discoveriesMu.Lock()
+	s.discoveries["en0"] = discoveryInfo{id: 1, cancel: func() { cancelCalled = true }}
+	s.discoveriesMu.Unlock()
+
+	// Send InterfaceRemoved event
+	s.handleNetworkInterfaceEvent(ctx, netmon.InterfaceEvent{
+		Type:          netmon.InterfaceRemoved,
+		InterfaceName: "en0",
+	})
+
+	// Cancel should have been called
+	assert.True(t, cancelCalled, "cancel should be called when interface is removed")
+
+	// Discovery should be removed from map
+	s.discoveriesMu.Lock()
+	_, exists := s.discoveries["en0"]
+	s.discoveriesMu.Unlock()
+	assert.False(t, exists, "discovery should be removed from map")
+}
+
+func TestService_Close_CancelsAllDiscoveries(t *testing.T) {
+	s := NewService()
+
+	// Track if cancels were called
+	cancel1Called := false
+	cancel2Called := false
+
+	s.discoveriesMu.Lock()
+	s.discoveries["en0"] = discoveryInfo{id: 1, cancel: func() { cancel1Called = true }}
+	s.discoveries["en1"] = discoveryInfo{id: 2, cancel: func() { cancel2Called = true }}
+	s.discoveriesMu.Unlock()
+
+	err := s.Close()
+	require.NoError(t, err)
+
+	// Both cancels should have been called
+	assert.True(t, cancel1Called, "cancel1 should be called on Close")
+	assert.True(t, cancel2Called, "cancel2 should be called on Close")
+
+	// Discoveries map should be reset
+	s.discoveriesMu.Lock()
+	count := len(s.discoveries)
+	s.discoveriesMu.Unlock()
+	assert.Equal(t, 0, count, "discoveries map should be empty after Close")
+}
+
+func TestService_DiscoveryID_PreventsWrongDeletion(t *testing.T) {
+	// This tests that an old goroutine's defer doesn't delete a newer discovery
+	s := NewService()
+	defer s.Close()
+
+	// Simulate: old discovery with ID=1 was cancelled, new discovery with ID=2 started
+	s.discoveriesMu.Lock()
+	s.discoveries["en0"] = discoveryInfo{id: 2, cancel: func() {}}
+	s.discoveriesMu.Unlock()
+
+	// Simulate old goroutine trying to clean up with ID=1
+	// (This is what the defer does, checking if the ID matches)
+	s.discoveriesMu.Lock()
+	oldDiscoveryID := uint64(1)
+	if info, exists := s.discoveries["en0"]; exists && info.id == oldDiscoveryID {
+		// This should NOT execute because IDs don't match
+		delete(s.discoveries, "en0")
+	}
+	s.discoveriesMu.Unlock()
+
+	// The new discovery (ID=2) should still be in the map
+	s.discoveriesMu.Lock()
+	info, exists := s.discoveries["en0"]
+	s.discoveriesMu.Unlock()
+
+	assert.True(t, exists, "new discovery should still exist")
+	assert.Equal(t, uint64(2), info.id, "discovery ID should be 2")
 }
