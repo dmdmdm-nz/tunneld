@@ -113,7 +113,7 @@ func (s *Service) handleWatcherEvent(ev InterfaceEvent) {
 		if _, exists := s.interfaces[ev.InterfaceName]; !exists {
 			s.interfaces[ev.InterfaceName] = struct{}{}
 			s.mu.Unlock()
-			log.WithField("interface", ev.InterfaceName).Info("Detected new IPv6 network interface")
+			log.WithField("interface", ev.InterfaceName).Debug("Detected new IPv6 network interface")
 			s.broadcast(ev)
 		} else {
 			s.mu.Unlock()
@@ -123,7 +123,7 @@ func (s *Service) handleWatcherEvent(ev InterfaceEvent) {
 		if _, exists := s.interfaces[ev.InterfaceName]; exists {
 			delete(s.interfaces, ev.InterfaceName)
 			s.mu.Unlock()
-			log.WithField("interface", ev.InterfaceName).Info("Detected missing IPv6 network interface")
+			log.WithField("interface", ev.InterfaceName).Debug("Detected missing IPv6 network interface")
 			s.broadcast(ev)
 		} else {
 			s.mu.Unlock()
@@ -220,10 +220,6 @@ func (s *Service) checkInterfaceForIpV6(iface *net.Interface) bool {
 
 // UpsertInterface adds/updates an interface and publishes an Added event.
 func (s *Service) UpsertInterface(interfaceName string) {
-	log.WithFields(log.Fields{
-		"interface": interfaceName,
-	}).Info("Detected new IPv6 network interface")
-
 	s.mu.Lock()
 	s.interfaces[interfaceName] = struct{}{}
 	s.mu.Unlock()
@@ -233,10 +229,6 @@ func (s *Service) UpsertInterface(interfaceName string) {
 
 // RemoveInterface removes an interface and publishes a Removed event.
 func (s *Service) RemoveInterface(interfaceName string) {
-	log.WithFields(log.Fields{
-		"interface": interfaceName,
-	}).Info("Detected missing IPv6 network interface")
-
 	s.mu.Lock()
 	_, found := s.interfaces[interfaceName]
 	s.mu.Unlock()
@@ -247,7 +239,7 @@ func (s *Service) RemoveInterface(interfaceName string) {
 
 		log.WithFields(log.Fields{
 			"interface": interfaceName,
-		}).Debug("Interface event processing complete")
+		}).Trace("Interface event processing complete")
 	}
 }
 

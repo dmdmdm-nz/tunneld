@@ -4,8 +4,50 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	log "github.com/sirupsen/logrus"
 )
+
+// ErrPairingRejected is returned when the device rejects the pairing request
+var ErrPairingRejected = errors.New("pairing rejected by device")
+
+// checkPairingRejection checks if the event contains a pairing rejection error
+// Returns an error if rejected, nil otherwise
+func checkPairingRejection(e map[string]interface{}) error {
+	rejected, ok := e["pairingRejectedWithError"]
+	if !ok {
+		return nil
+	}
+
+	rejectedMap, ok := rejected.(map[string]interface{})
+	if !ok {
+		return ErrPairingRejected
+	}
+
+	wrappedErr, err := getChildMap(rejectedMap, "wrappedError")
+	if err != nil {
+		return ErrPairingRejected
+	}
+
+	code, _ := wrappedErr["code"].(float64)
+	domain, _ := wrappedErr["domain"].(string)
+
+	userInfo, err := getChildMap(wrappedErr, "userInfo")
+	if err != nil {
+		return ErrPairingRejected
+	}
+
+	desc, _ := userInfo["NSLocalizedDescription"].(string)
+	log.WithFields(log.Fields{
+		"code":        int(code),
+		"domain":      domain,
+		"description": desc,
+	}).Warn("Device rejected pairing request")
+
+	return fmt.Errorf("%w: %s (code %d)", ErrPairingRejected, desc, int(code))
+}
 
 type eventCodec interface {
 	Encode() map[string]interface{}
@@ -33,6 +75,11 @@ func (p *pairingData) Encode() map[string]interface{} {
 }
 
 func (p *pairingData) Decode(e map[string]interface{}) error {
+	// Check for pairing rejection error
+	if err := checkPairingRejection(e); err != nil {
+		return err
+	}
+
 	pd, err := getChildMap(e, "pairingData", "_0")
 	if err != nil {
 		return err

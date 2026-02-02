@@ -142,11 +142,11 @@ func (w *darwinWatcher) handleInterfaceEvent(index int, msgType byte, ifFlags ui
 	_, isTracked := w.tracked[iface.Name]
 
 	if hasIPv6 && !isTracked {
-		log.WithField("interface", iface.Name).Debug("Interface now has IPv6 address")
+		log.WithField("interface", iface.Name).Trace("Interface now has IPv6 address")
 		w.tracked[iface.Name] = struct{}{}
 		callback(InterfaceEvent{Type: InterfaceAdded, InterfaceName: iface.Name})
 	} else if !hasIPv6 && isTracked {
-		log.WithField("interface", iface.Name).Debug("Interface no longer has IPv6 address")
+		log.WithField("interface", iface.Name).Trace("Interface no longer has IPv6 address")
 		delete(w.tracked, iface.Name)
 		callback(InterfaceEvent{Type: InterfaceRemoved, InterfaceName: iface.Name})
 	}
@@ -159,7 +159,7 @@ func (w *darwinWatcher) removeInterface(name string, callback func(InterfaceEven
 	w.mu.Unlock()
 
 	if isTracked {
-		log.WithField("interface", name).Debug("Interface removed or down")
+		log.WithField("interface", name).Trace("Interface removed or down")
 		callback(InterfaceEvent{Type: InterfaceRemoved, InterfaceName: name})
 	}
 }
@@ -172,7 +172,7 @@ func (w *darwinWatcher) removeInterfaceByIndex(index int, callback func(Interfac
 	for name := range w.tracked {
 		iface, err := net.InterfaceByName(name)
 		if err != nil || iface.Index == index {
-			log.WithField("interface", name).Debug("Interface removed")
+			log.WithField("interface", name).Trace("Interface removed")
 			delete(w.tracked, name)
 			callback(InterfaceEvent{Type: InterfaceRemoved, InterfaceName: name})
 			return
@@ -194,7 +194,7 @@ func (w *darwinWatcher) reconcileAll(callback func(InterfaceEvent)) {
 			continue
 		}
 		if hasIPv6Address(&iface) {
-			log.WithField("interface", iface.Name).Debug("Interface has IPv6 address")
+			log.WithField("interface", iface.Name).Trace("Interface has IPv6 address")
 			w.tracked[iface.Name] = struct{}{}
 			callback(InterfaceEvent{Type: InterfaceAdded, InterfaceName: iface.Name})
 		}

@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"sync/atomic"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
 )
+
+const handshakeTimeout = 3 * time.Second
 
 type StreamId uint32
 
@@ -32,10 +36,15 @@ func (r *HttpConnection) Close() error {
 	return r.closer.Close()
 }
 
-func NewHttpConnection(rw io.ReadWriteCloser) (*HttpConnection, error) {
-	framer := http2.NewFramer(rw, rw)
+func NewHttpConnection(conn net.Conn) (*HttpConnection, error) {
+	framer := http2.NewFramer(conn, conn)
 
-	_, err := rw.Write([]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"))
+	// Set deadline for the handshake
+	if err := conn.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+		return nil, fmt.Errorf("NewHttpConnection: could not set deadline. %w", err)
+	}
+
+	_, err := conn.Write([]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"))
 	if err != nil {
 		return nil, fmt.Errorf("NewHttpConnection: could not write PRI. %w", err)
 	}
@@ -52,7 +61,7 @@ func NewHttpConnection(rw io.ReadWriteCloser) (*HttpConnection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("NewHttpConnection: could not write window update. %w", err)
 	}
-	//
+
 	frame, err := framer.ReadFrame()
 	if err != nil {
 		return nil, fmt.Errorf("NewHttpConnection: could not read frame. %w", err)
@@ -72,11 +81,16 @@ func NewHttpConnection(rw io.ReadWriteCloser) (*HttpConnection, error) {
 			Warn("expected setttings frame")
 	}
 
+	// Clear the deadline after successful handshake
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return nil, fmt.Errorf("NewHttpConnection: could not clear deadline. %w", err)
+	}
+
 	return &HttpConnection{
 		framer:             framer,
 		clientServerStream: bytes.NewBuffer(nil),
 		serverClientStream: bytes.NewBuffer(nil),
-		closer:             rw,
+		closer:             conn,
 		csIsOpen:           &atomic.Bool{},
 		scIsOpen:           &atomic.Bool{},
 	}, nil
@@ -140,7 +154,9 @@ func (r *HttpConnection) readDataFrame() error {
 			}
 			return nil
 		case http2.FrameGoAway:
-			return fmt.Errorf("received GOAWAY")
+			g := f.(*http2.GoAwayFrame)
+			return fmt.Errorf("received GOAWAY: lastStreamID=%d, errCode=%s, debugData=%q",
+				g.LastStreamID, g.ErrCode.String(), string(g.DebugData()))
 		case http2.FrameSettings:
 			s := f.(*http2.SettingsFrame)
 			if s.Flags&http2.FlagSettingsAck != http2.FlagSettingsAck {
