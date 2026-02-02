@@ -89,7 +89,7 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 					Address:       fmt.Sprintf("%s%%%d", entry.AddrIPv6[0].String(), resultInterface.Index),
 					InterfaceName: iface.Name,
 				}
-				svc.Udid, svc.DeviceIosVersion, err = TryGetRsdInfo(ctx, svc.Address)
+				svc.Udid, svc.DeviceIosVersion, svc.Services, err = TryGetRsdInfo(ctx, svc.Address)
 				if err != nil {
 					log.WithField("address", svc.Address).
 						Trace("Failed to get UDID from address:", err.Error())
@@ -132,19 +132,25 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 	return RsdService{}, lastErr
 }
 
-func TryGetRsdInfo(ctx context.Context, addr string) (string, string, error) {
-	s, err := tunnel.NewWithAddrPort(addr, RSD_PORT, addr)
+func TryGetRsdInfo(ctx context.Context, addr string) (string, string, map[string]ServiceEntry, error) {
+	s, err := tunnel.NewWithAddrPort(addr, RSD_PORT)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	defer s.Close()
 
 	h, err := s.Handshake()
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 
-	return string(h.Udid), h.ProductVersion, nil
+	// Convert tunnel.RsdServiceEntry to rsd.ServiceEntry
+	services := make(map[string]ServiceEntry, len(h.Services))
+	for name, entry := range h.Services {
+		services[name] = ServiceEntry{Port: entry.Port}
+	}
+
+	return string(h.Udid), h.ProductVersion, services, nil
 }
 
 // GetInterfaceByName returns the network interface that matches the given name.

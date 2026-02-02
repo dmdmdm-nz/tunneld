@@ -8,12 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net"
 	"os"
 	"os/exec"
-	"sync/atomic"
-	"time"
 
 	"github.com/dmdmdm-nz/tunneld/internal/tls"
 	"github.com/dmdmdm-nz/tunneld/internal/tunnel/http"
@@ -23,9 +20,6 @@ import (
 )
 
 const TUNNEL_MTU = 64_000
-
-// connectionIDCounter is used to generate unique connection IDs for logging
-var connectionIDCounter atomic.Uint64
 
 // Tunnel describes the parameters of an established tunnel to the device
 type Tunnel struct {
@@ -45,28 +39,17 @@ func (t Tunnel) Close() error {
 }
 
 // ManualPairAndConnectToTunnel tries to verify an existing pairing, and if this fails it triggers a new manual pairing process.
-// After a successful pairing a tunnel for this device gets started and the tunnel information is returned
-func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, addr string, udid string, autoPair bool, tn *TunnelNotifications) (Tunnel, error) {
+// After a successful pairing a tunnel for this device gets started and the tunnel information is returned.
+// The untrustedTunnelPort should be obtained from the RSD services discovered during device discovery.
+func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, addr string, udid string, untrustedTunnelPort int, autoPair bool, tn *TunnelNotifications) (Tunnel, error) {
 	tn.NotifyTunnelStatus(udid, ConnectingToDevice)
 
-	port, err := getUntrustedTunnelServicePort(addr, udid)
-	if err != nil {
-		tn.NotifyTunnelStatus(udid, Failed)
-		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: could not find port for '%s'", untrustedTunnelServiceName)
-	}
-
-	conn, err := ConnectTUN(addr, port)
+	conn, err := ConnectTUN(addr, untrustedTunnelPort)
 	if err != nil {
 		tn.NotifyTunnelStatus(udid, Failed)
 		return Tunnel{}, fmt.Errorf("ManualPairAndConnectToTunnel: failed to connect to TUN device: %w", err)
 	}
-
-	connID := connectionIDCounter.Add(1)
-	log.WithFields(log.Fields{"udid": udid, "connID": connID}).Debug("Creating HTTP2 connection")
-	defer func() {
-		log.WithFields(log.Fields{"udid": udid, "connID": connID}).Debug("Closing HTTP2 connection")
-		conn.Close()
-	}()
+	defer conn.Close()
 
 	h, err := http.NewHttpConnection(conn)
 	if err != nil {
@@ -130,40 +113,21 @@ func ManualPairAndConnectToTunnel(ctx context.Context, p *PairRecordManager, add
 }
 
 // ManualPair tries to verify an existing pairing, and if this fails it triggers a new manual pairing process.
-func ManualPair(ctx context.Context, p *PairRecordManager, addr string, udid string, tn *TunnelNotifications) error {
+// The untrustedTunnelPort should be obtained from the RSD services discovered during device discovery.
+func ManualPair(ctx context.Context, p *PairRecordManager, addr string, udid string, untrustedTunnelPort int, tn *TunnelNotifications) error {
 	tn.NotifyTunnelStatus(udid, ConnectingToDevice)
 
-	port, err := getUntrustedTunnelServicePort(addr, udid)
-	if err != nil {
-		tn.NotifyTunnelStatus(udid, Failed)
-		return fmt.Errorf("ManualPair: could not find port for '%s'", untrustedTunnelServiceName)
-	}
-
-	conn, err := ConnectTUN(addr, port)
+	conn, err := ConnectTUN(addr, untrustedTunnelPort)
 	if err != nil {
 		tn.NotifyTunnelStatus(udid, Failed)
 		return fmt.Errorf("ManualPair: failed to connect to TUN device: %w", err)
 	}
+	defer conn.Close()
 
-	connID := connectionIDCounter.Add(1)
-	log.WithFields(log.Fields{"udid": udid, "connID": connID}).Debug("Creating HTTP2 connection")
-	defer func() {
-		log.WithFields(log.Fields{"udid": udid, "connID": connID}).Debug("Closing HTTP2 connection")
-		conn.Close()
-	}()
-
-	var h *http.HttpConnection
-	for attempt := 1; attempt <= 5; attempt++ {
-		h, err = http.NewHttpConnection(conn)
-		if err == nil {
-			break
-		}
-		log.WithFields(log.Fields{"udid": udid, "connID": connID, "attempt": attempt}).WithError(err).Debug("Failed to create HTTP2 connection, retrying")
-		if attempt == 5 {
-			tn.NotifyTunnelStatus(udid, Failed)
-			return fmt.Errorf("ManualPair: failed to create HTTP2 connection after 5 attempts: %w", err)
-		}
-		time.Sleep(500 * time.Millisecond)
+	h, err := http.NewHttpConnection(conn)
+	if err != nil {
+		tn.NotifyTunnelStatus(udid, Failed)
+		return fmt.Errorf("ManualPair: failed to create HTTP2 connection: %w", err)
 	}
 
 	xpcConn, err := CreateXpcConnection(h)
@@ -196,43 +160,6 @@ func ManualPair(ctx context.Context, p *PairRecordManager, addr string, udid str
 	tn.NotifyDevicePaired(udid)
 	tn.NotifyTunnelStatus(udid, Disconnected)
 	return nil
-}
-
-func getUntrustedTunnelServicePort(addr string, udid string) (int, error) {
-	l := log.WithField("udid", udid)
-
-	// Suspend remoted during initial connection to prevent interference
-	l.Trace("getUntrustedTunnelServicePort: suspending remoted")
-	resumeRemoted, err := SuspendRemoted()
-	if err != nil {
-		l.WithError(err).Warn("Failed to suspend remoted, continuing anyway")
-	}
-	if resumeRemoted != nil {
-		defer resumeRemoted()
-	}
-	l.Trace("getUntrustedTunnelServicePort: remoted suspended, connecting to RSD")
-
-	rsdService, err := NewWithAddr(addr, udid)
-	if err != nil {
-		return 0, fmt.Errorf("getUntrustedTunnelServicePort: failed to connect to RSD service: %w", err)
-	}
-	defer rsdService.Close()
-	l.Trace("getUntrustedTunnelServicePort: connected, starting handshake")
-
-	handshakeResponse, err := rsdService.Handshake()
-	if err != nil {
-		return 0, fmt.Errorf("getUntrustedTunnelServicePort: failed to perform RSD handshake: %w", err)
-	}
-	l.Trace("getUntrustedTunnelServicePort: handshake complete")
-
-	port := handshakeResponse.GetPort(untrustedTunnelServiceName)
-	if port == 0 {
-		l.WithField("services", maps.Values(handshakeResponse.Services)).Info("Available services")
-		return 0, fmt.Errorf("getUntrustedTunnelServicePort: could not find port for '%s'", untrustedTunnelServiceName)
-	}
-
-	log.WithField("port", port).Info("Port number")
-	return port, nil
 }
 
 func connectToTunnel(ctx context.Context, info tunnelListener, addr string, udid string, sharedSecret []byte) (Tunnel, error) {
@@ -290,7 +217,7 @@ func connectToTunnel(ctx context.Context, info tunnelListener, addr string, udid
 		closeFunc()
 	}()
 
-	services, err := listRsdServices(tunnelInfo.ServerAddress, int(tunnelInfo.ServerRSDPort), udid)
+	services, err := listRsdServices(tunnelInfo.ServerAddress, int(tunnelInfo.ServerRSDPort))
 	if err != nil {
 		closeFunc()
 		return Tunnel{}, fmt.Errorf("could not list RSD services: %w", err)
@@ -468,8 +395,8 @@ func exchangeCoreTunnelParameters(stream io.ReadWriteCloser) (tunnelParameters, 
 	return parameters, nil
 }
 
-func listRsdServices(address string, port int, udid string) ([]RsdServiceInfo, error) {
-	rsd, err := NewWithAddrPort(address, port, udid)
+func listRsdServices(address string, port int) ([]RsdServiceInfo, error) {
+	rsd, err := NewWithAddrPort(address, port)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create RSD service: %w", err)
 	}

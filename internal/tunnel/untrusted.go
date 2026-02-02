@@ -22,9 +22,9 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// untrustedTunnelServiceName is the service name that is described in the Remote Service Discovery of the
+// UntrustedTunnelServiceName is the service name that is described in the Remote Service Discovery of the
 // ethernet interface of the device (not the tunnel interface)
-const untrustedTunnelServiceName = "com.apple.internal.dt.coredevice.untrusted.tunnelservice"
+const UntrustedTunnelServiceName = "com.apple.internal.dt.coredevice.untrusted.tunnelservice"
 
 type PairingResult struct {
 	SharedSecret []byte
