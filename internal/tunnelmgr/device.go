@@ -340,7 +340,7 @@ func (d *TunnelDevice) ensurePaired(ctx context.Context) error {
 			return nil
 		}
 
-		err := tunnel.ManualPair(ctx, d.pm, d.rsdInfo.Address, d.udid, d.tn)
+		err := tunnel.ManualPair(ctx, d.pm, d.rsdInfo.Address, d.udid, d.getUntrustedTunnelPort(), d.tn)
 		if err == nil {
 			log.WithField("udid", d.udid).Debug("Device is paired")
 			return nil
@@ -388,7 +388,7 @@ func (d *TunnelDevice) connectTunnel(ctx context.Context) (*tunnel.Tunnel, error
 		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 
 		// autoPair=false since we already ensured pairing in phase 1
-		t, err = tunnel.ManualPairAndConnectToTunnel(attemptCtx, d.pm, d.rsdInfo.Address, d.udid, false, d.tn)
+		t, err = tunnel.ManualPairAndConnectToTunnel(attemptCtx, d.pm, d.rsdInfo.Address, d.udid, d.getUntrustedTunnelPort(), false, d.tn)
 		cancel()
 
 		if err == nil {
@@ -485,4 +485,13 @@ func (d *TunnelDevice) isIos17OrGreater() bool {
 	}
 
 	return true
+}
+
+// getUntrustedTunnelPort returns the port for the untrusted tunnel service from the discovered services.
+// Returns 0 if the service is not found.
+func (d *TunnelDevice) getUntrustedTunnelPort() int {
+	if entry, ok := d.rsdInfo.Services[tunnel.UntrustedTunnelServiceName]; ok {
+		return int(entry.Port)
+	}
+	return 0
 }

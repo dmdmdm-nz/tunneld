@@ -12,6 +12,12 @@ type RsdService struct {
 	InterfaceName    string
 	Address          string
 	DeviceIosVersion string
+	Services         map[string]ServiceEntry
+}
+
+// ServiceEntry represents a service available on the device.
+type ServiceEntry struct {
+	Port uint32
 }
 
 type RsdServiceEvent struct {

@@ -160,46 +160,36 @@ func (r RsdHandshakeResponse) GetServices() map[string]RsdServiceEntry {
 	return r.Services
 }
 
-// NewWithAddrPort creates a new RsdService with the given address and port 58783 using a HTTP2 based XPC connection,
-// connecting to an operating system level TUN device. The deviceId is used for logging (UDID or address).
-func NewWithAddrPort(addr string, port int, deviceId string) (RsdService, error) {
-	l := log.WithField("device", deviceId)
-	l.Trace("NewWithAddrPort: connecting to RSD port")
+// NewWithAddrPort creates a new RsdService with the given address and port using a HTTP2 based XPC connection,
+// connecting to an operating system level TUN device.
+func NewWithAddrPort(addr string, port int) (RsdService, error) {
 	conn, err := ConnectTUN(addr, port)
 	if err != nil {
 		return RsdService{}, fmt.Errorf("NewWithAddrPort: failed to connect to device: %w", err)
 	}
-	l.Trace("NewWithAddrPort: TCP connection established")
-	return newRsdServiceFromTcpConn(conn, deviceId)
+	return newRsdServiceFromTcpConn(conn)
 }
 
 // NewWithAddr creates a new RsdService with the given address and port 58783 using a HTTP2 based XPC connection.
-func NewWithAddr(addr string, udid string) (RsdService, error) {
-	l := log.WithField("udid", udid)
-	l.Trace("NewWithAddr: connecting to RSD port")
+func NewWithAddr(addr string) (RsdService, error) {
 	conn, err := ConnectTUN(addr, RSD_PORT)
 	if err != nil {
 		return RsdService{}, fmt.Errorf("NewWithAddr: failed to connect to device: %w", err)
 	}
-	l.Trace("NewWithAddr: TCP connection established")
-	return newRsdServiceFromTcpConn(conn, udid)
+	return newRsdServiceFromTcpConn(conn)
 }
 
-func newRsdServiceFromTcpConn(conn *net.TCPConn, udid string) (RsdService, error) {
-	l := log.WithField("udid", udid)
-	l.Trace("newRsdServiceFromTcpConn: creating HTTP/2 connection")
+func newRsdServiceFromTcpConn(conn *net.TCPConn) (RsdService, error) {
 	h, err := http.NewHttpConnection(conn)
 	if err != nil {
 		return RsdService{}, fmt.Errorf("newRsdServiceFromTcpConn: failed to connect to http2: %w", err)
 	}
 
-	l.Trace("newRsdServiceFromTcpConn: creating XPC connection")
 	x, err := CreateXpcConnection(h)
 	if err != nil {
 		return RsdService{}, fmt.Errorf("newRsdServiceFromTcpConn: failed to create xpc connection: %w", err)
 	}
 
-	l.Trace("newRsdServiceFromTcpConn: complete")
 	return RsdService{
 		xpc: x,
 		c:   h,
