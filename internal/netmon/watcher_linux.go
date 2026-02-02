@@ -142,7 +142,7 @@ func (w *linuxWatcher) handleAddrUpdate(update netlink.AddrUpdate, callback func
 		w.mu.Lock()
 		_, isTracked := w.tracked[name]
 		if !isTracked {
-			log.WithField("interface", name).Debug("Interface now has IPv6 address")
+			log.WithField("interface", name).Trace("Interface now has IPv6 address")
 			w.tracked[name] = struct{}{}
 			w.mu.Unlock()
 			callback(InterfaceEvent{Type: InterfaceAdded, InterfaceName: name})
@@ -162,7 +162,7 @@ func (w *linuxWatcher) handleAddrUpdate(update netlink.AddrUpdate, callback func
 				w.mu.Lock()
 				delete(w.tracked, name)
 				w.mu.Unlock()
-				log.WithField("interface", name).Debug("Interface no longer has IPv6 address")
+				log.WithField("interface", name).Trace("Interface no longer has IPv6 address")
 				callback(InterfaceEvent{Type: InterfaceRemoved, InterfaceName: name})
 			}
 		}
@@ -189,11 +189,11 @@ func (w *linuxWatcher) evaluateInterface(name string, index int, callback func(I
 	_, isTracked := w.tracked[name]
 
 	if hasIPv6 && !isTracked {
-		log.WithField("interface", name).Debug("Interface now has IPv6 address")
+		log.WithField("interface", name).Trace("Interface now has IPv6 address")
 		w.tracked[name] = struct{}{}
 		callback(InterfaceEvent{Type: InterfaceAdded, InterfaceName: name})
 	} else if !hasIPv6 && isTracked {
-		log.WithField("interface", name).Debug("Interface no longer has IPv6 address")
+		log.WithField("interface", name).Trace("Interface no longer has IPv6 address")
 		delete(w.tracked, name)
 		callback(InterfaceEvent{Type: InterfaceRemoved, InterfaceName: name})
 	}
@@ -206,7 +206,7 @@ func (w *linuxWatcher) removeInterface(name string, callback func(InterfaceEvent
 	w.mu.Unlock()
 
 	if isTracked {
-		log.WithField("interface", name).Debug("Interface removed or down")
+		log.WithField("interface", name).Trace("Interface removed or down")
 		callback(InterfaceEvent{Type: InterfaceRemoved, InterfaceName: name})
 	}
 }
@@ -230,7 +230,7 @@ func (w *linuxWatcher) reconcileAll(callback func(InterfaceEvent)) {
 			continue
 		}
 		if hasIPv6Address(&iface) {
-			log.WithField("interface", iface.Name).Debug("Interface has IPv6 address")
+			log.WithField("interface", iface.Name).Trace("Interface has IPv6 address")
 			w.tracked[iface.Name] = struct{}{}
 			callback(InterfaceEvent{Type: InterfaceAdded, InterfaceName: iface.Name})
 		}

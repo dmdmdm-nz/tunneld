@@ -39,62 +39,59 @@ func TestRSD_PORT_Constant(t *testing.T) {
 	assert.Equal(t, 58783, RSD_PORT)
 }
 
-func TestFindRsdService_ResumeRemotedCalledOnCancel(t *testing.T) {
+func TestFindRsdService_SuspendCalledOnValidInterface(t *testing.T) {
 	// Save original and restore after test
 	originalSuspendFunc := suspendRemotedFunc
 	defer func() { suspendRemotedFunc = originalSuspendFunc }()
 
-	// Track if resume was called
+	// Track suspend and resume calls
+	var suspendCalled atomic.Bool
 	var resumeCalled atomic.Bool
 
-	// Mock suspendRemotedFunc to return a trackable resume function
+	// Mock suspendRemotedFunc to track calls
 	suspendRemotedFunc = func() (func(), error) {
+		suspendCalled.Store(true)
 		return func() {
 			resumeCalled.Store(true)
 		}, nil
 	}
 
-	// Create a context that we'll cancel
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create a context with short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
 
-	// Start FindRsdService in a goroutine
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		// Use a non-existent interface so it fails quickly on GetInterfaceByName
-		// or times out on discovery - either way, we'll cancel first
-		_, _ = FindRsdService(ctx, "nonexistent_test_iface")
-	}()
-
-	// Give it a moment to start, then cancel
-	time.Sleep(10 * time.Millisecond)
-	cancel()
-
-	// Wait for FindRsdService to return
-	select {
-	case <-done:
-		// Good, it returned
-	case <-time.After(5 * time.Second):
-		t.Fatal("FindRsdService did not return after context cancellation")
+	// Use loopback interface which should exist
+	interfaceName := "lo0"
+	if _, err := GetInterfaceByName(interfaceName); err != nil {
+		interfaceName = "lo"
+		if _, err := GetInterfaceByName(interfaceName); err != nil {
+			t.Skip("loopback interface not found")
+		}
 	}
 
-	// Verify resume was called
-	assert.True(t, resumeCalled.Load(), "resumeRemoted should be called when context is cancelled")
+	// Start FindRsdService - it should call suspend because interface exists
+	_, _ = FindRsdService(ctx, interfaceName)
+
+	// Verify suspend was called (interface exists, so Browse goroutine started)
+	assert.True(t, suspendCalled.Load(), "suspendRemoted should be called when interface exists")
+
+	// Give the goroutine time to complete and call resume
+	time.Sleep(50 * time.Millisecond)
+	assert.True(t, resumeCalled.Load(), "resumeRemoted should be called after Browse completes")
 }
 
-func TestFindRsdService_ResumeRemotedCalledOnInterfaceNotFound(t *testing.T) {
+func TestFindRsdService_NoSuspendOnInterfaceNotFound(t *testing.T) {
 	// Save original and restore after test
 	originalSuspendFunc := suspendRemotedFunc
 	defer func() { suspendRemotedFunc = originalSuspendFunc }()
 
-	// Track if resume was called
-	var resumeCalled atomic.Bool
+	// Track if suspend was called
+	var suspendCalled atomic.Bool
 
 	// Mock suspendRemotedFunc
 	suspendRemotedFunc = func() (func(), error) {
-		return func() {
-			resumeCalled.Store(true)
-		}, nil
+		suspendCalled.Store(true)
+		return func() {}, nil
 	}
 
 	ctx := context.Background()
@@ -106,6 +103,6 @@ func TestFindRsdService_ResumeRemotedCalledOnInterfaceNotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "interface not found")
 
-	// Verify resume was called even on early error return
-	assert.True(t, resumeCalled.Load(), "resumeRemoted should be called even when interface is not found")
+	// Verify suspend was NOT called - we fail early before starting the Browse goroutine
+	assert.False(t, suspendCalled.Load(), "suspendRemoted should not be called when interface is not found")
 }

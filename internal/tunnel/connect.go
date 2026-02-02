@@ -75,24 +75,30 @@ func initializeXpcConnection(h *http.HttpConnection) error {
 	return nil
 }
 
+const dialTimeout = 3 * time.Second
+
 // connect to a operating system level TUN device
 func ConnectTUN(address string, port int) (*net.TCPConn, error) {
-	addr, err := net.ResolveTCPAddr("tcp6", fmt.Sprintf("[%s]:%d", address, port))
-	if err != nil {
-		return nil, fmt.Errorf("ConnectToHttp2WithAddr: failed to resolve address: %w", err)
+	dialer := net.Dialer{
+		Timeout: dialTimeout,
 	}
-	conn, err := net.DialTCP("tcp", nil, addr)
+	conn, err := dialer.Dial("tcp6", fmt.Sprintf("[%s]:%d", address, port))
 	if err != nil {
-		return nil, fmt.Errorf("ConnectToHttp2WithAddr: failed to dial: %w", err)
+		return nil, fmt.Errorf("ConnectTUN: failed to dial: %w", err)
 	}
-	err = conn.SetKeepAlive(true)
-	if err != nil {
-		return nil, fmt.Errorf("ConnectUserSpaceTunnel: failed to set keepalive: %w", err)
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		conn.Close()
+		return nil, fmt.Errorf("ConnectTUN: expected TCP connection")
 	}
-	err = conn.SetKeepAlivePeriod(1 * time.Second)
+	err = tcpConn.SetKeepAlive(true)
 	if err != nil {
-		return nil, fmt.Errorf("ConnectUserSpaceTunnel: failed to set keepalive period: %w", err)
+		return nil, fmt.Errorf("ConnectTUN: failed to set keepalive: %w", err)
+	}
+	err = tcpConn.SetKeepAlivePeriod(1 * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("ConnectTUN: failed to set keepalive period: %w", err)
 	}
 
-	return conn, nil
+	return tcpConn, nil
 }

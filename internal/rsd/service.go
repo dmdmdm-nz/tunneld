@@ -168,9 +168,7 @@ func (s *Service) handleNetworkInterfaceEvent(ctx context.Context, ev netmon.Int
 		s.discoveriesMu.Unlock()
 
 		// Track goroutine for clean shutdown
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			defer func() {
 				s.discoveriesMu.Lock()
 				// Only delete if this is still our discovery (not replaced by a newer one)
@@ -187,9 +185,10 @@ func (s *Service) handleNetworkInterfaceEvent(ctx context.Context, ev netmon.Int
 			}
 
 			log.WithFields(log.Fields{
-				"interface": ev.InterfaceName,
-				"udid":      rsdService.Udid,
-				"addr":      rsdService.Address,
+				"interface":     ev.InterfaceName,
+				"udid":          rsdService.Udid,
+				"address":       rsdService.Address,
+				"deviceVersion": rsdService.DeviceIosVersion,
 			}).Info("Discovered RSD service")
 
 			// Add to map and broadcast Added
@@ -201,9 +200,9 @@ func (s *Service) handleNetworkInterfaceEvent(ctx context.Context, ev netmon.Int
 			log.WithFields(log.Fields{
 				"interface": ev.InterfaceName,
 				"udid":      rsdService.Udid,
-				"addr":      rsdService.Address,
+				"address":   rsdService.Address,
 			}).Debug("RSD event processing complete")
-		}()
+		})
 
 	case netmon.InterfaceRemoved:
 		// Cancel any in-progress discovery for this interface
@@ -229,7 +228,7 @@ func (s *Service) handleNetworkInterfaceEvent(ctx context.Context, ev netmon.Int
 			log.WithFields(log.Fields{
 				"interface": ev.InterfaceName,
 				"udid":      rsdService.Udid,
-				"addr":      rsdService.Address,
+				"address":   rsdService.Address,
 			}).Info("Detected missing RSD service")
 
 			s.broadcast(RsdServiceEvent{Type: RsdServiceRemoved, Info: rsdService})

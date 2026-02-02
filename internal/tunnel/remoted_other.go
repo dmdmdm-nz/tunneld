@@ -2,10 +2,15 @@
 
 package tunnel
 
-// monitorRemoted is a no-op on non-macOS platforms since remoted only exists on macOS.
-func (r *RemotedService) monitorRemoted() {
-	defer close(r.monitorDone)
+// initRemoted is a no-op on non-macOS platforms since remoted only exists on macOS.
+func initRemoted() {}
 
-	// Just wait for stop signal
-	<-r.monitorStop
+// suspendRemoted is a no-op on non-macOS platforms since remoted only exists on macOS.
+func suspendRemoted() (func(), error) {
+	return func() {}, nil
+}
+
+// forceResumeRemoted is a no-op on non-macOS platforms since remoted only exists on macOS.
+func forceResumeRemoted() error {
+	return nil
 }

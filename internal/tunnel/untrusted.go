@@ -40,6 +40,12 @@ func newTunnelServiceWithXpc(xpcConn *xpc.Connection, c io.Closer, pairRecords *
 	}
 }
 
+// deviceKeyData holds the device's SRP public key and salt received during pairing
+type deviceKeyData struct {
+	publicKey []byte
+	salt      []byte
+}
+
 type tunnelService struct {
 	xpcConn *xpc.Connection
 	c       io.Closer
@@ -48,6 +54,9 @@ type tunnelService struct {
 	cipher         *cipherStream
 
 	pairRecords *PairRecordManager
+
+	// pendingDeviceKey holds device key data if it was received in the setupManualPairing response
+	pendingDeviceKey *deviceKeyData
 }
 
 func (t *tunnelService) Close() error {
@@ -206,14 +215,26 @@ func (t *tunnelService) setupManualPairing() error {
 	if err != nil {
 		return err
 	}
+
+	// Read the response - this is an acknowledgment, not a pairingData event
 	_, err = t.controlChannel.read()
 	if err != nil {
-		return err
+		return fmt.Errorf("setupManualPairing: failed to read response: %w", err)
 	}
-	return err
+
+	return nil
 }
 
 func (t *tunnelService) readDeviceKey(ctx context.Context) (publicKey []byte, salt []byte, err error) {
+	// Check if we already have the device key data from setupManualPairing response
+	if t.pendingDeviceKey != nil {
+		publicKey = t.pendingDeviceKey.publicKey
+		salt = t.pendingDeviceKey.salt
+		t.pendingDeviceKey = nil // Clear after use
+		return
+	}
+
+	// Otherwise, wait for the device to send the key data (after user presses Trust)
 	var pairingData pairingData
 	done := make(chan error, 1)
 
@@ -229,6 +250,13 @@ func (t *tunnelService) readDeviceKey(ctx context.Context) (publicKey []byte, sa
 		if err != nil {
 			return
 		}
+	}
+
+	// Check if the response contains an error
+	errRes, parseErr := tlvReader(pairingData.data).readCoalesced(typeError)
+	if parseErr == nil && len(errRes) > 0 {
+		err = fmt.Errorf("device returned error: %w", tlvError(errRes[0]))
+		return
 	}
 
 	publicKey, err = tlvReader(pairingData.data).readCoalesced(typePublicKey)

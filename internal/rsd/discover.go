@@ -22,22 +22,34 @@ var suspendRemotedFunc = tunnel.SuspendRemoted
 func FindRsdService(ctx context.Context, interfaceName string) (RsdService, error) {
 	log.WithField("interface", interfaceName).Debug("Searching for RSD service on interface")
 
-	const maxAttempts = 30
-	var lastErr error
+	// Verify interface exists before suspending remoted
+	iface, err := GetInterfaceByName(interfaceName)
+	if err != nil {
+		log.WithField("interface", interfaceName).WithError(err).Trace("Failed to get interface")
+		return RsdService{}, err
+	}
 
+	// Suspend remoted for the entire discovery process
 	resumeRemoted, err := suspendRemotedFunc()
 	if err != nil {
-		log.WithField("interface", interfaceName).Error("Failed to suspend remoted:", err.Error())
-		return RsdService{}, fmt.Errorf("failed to suspend remoted: %w", err)
+		log.WithField("interface", interfaceName).WithError(err).Warn("Failed to suspend remoted, continuing anyway")
 	}
-	defer resumeRemoted()
+	defer func() {
+		if resumeRemoted != nil {
+			resumeRemoted()
+		}
+	}()
+
+	const maxAttempts = 10 // approximately 30 seconds
+	var lastErr error
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		entries := make(chan *zeroconf.ServiceEntry)
 		resultCh := make(chan RsdService, 1)
 		errCh := make(chan error, 1)
 
-		iface, err := GetInterfaceByName(interfaceName)
+		// Re-check interface on retries (it may have gone away)
+		iface, err = GetInterfaceByName(interfaceName)
 		if err != nil {
 			// The interface we're browsing on has gone away.
 			log.WithField("interface", interfaceName).WithError(err).Trace("Failed to get interface")
@@ -121,7 +133,7 @@ func FindRsdService(ctx context.Context, interfaceName string) (RsdService, erro
 }
 
 func TryGetRsdInfo(ctx context.Context, addr string) (string, string, error) {
-	s, err := tunnel.NewWithAddrPort(addr, RSD_PORT)
+	s, err := tunnel.NewWithAddrPort(addr, RSD_PORT, addr)
 	if err != nil {
 		return "", "", err
 	}

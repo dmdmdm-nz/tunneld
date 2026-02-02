@@ -260,6 +260,31 @@ type Config struct {
 	serverInitOnce sync.Once // guards calling (*Config).serverInit
 }
 
+// Clone returns a shallow clone of c. It is safe to clone a Config that is
+// being used concurrently by a TLS client or server.
+func (c *Config) Clone() *Config {
+	return &Config{
+		Rand:                     c.Rand,
+		Time:                     c.Time,
+		Certificates:             c.Certificates,
+		NameToCertificate:        c.NameToCertificate,
+		RootCAs:                  c.RootCAs,
+		NextProtos:               c.NextProtos,
+		ServerName:               c.ServerName,
+		ClientAuth:               c.ClientAuth,
+		ClientCAs:                c.ClientCAs,
+		InsecureSkipVerify:       c.InsecureSkipVerify,
+		CipherSuites:             c.CipherSuites,
+		PreferServerCipherSuites: c.PreferServerCipherSuites,
+		SessionTicketsDisabled:   c.SessionTicketsDisabled,
+		SessionTicketKey:         c.SessionTicketKey,
+		Extra:                    c.Extra,
+		MinVersion:               c.MinVersion,
+		MaxVersion:               c.MaxVersion,
+		// serverInitOnce is deliberately not copied
+	}
+}
+
 func (c *Config) serverInit() {
 	if c.SessionTicketsDisabled {
 		return

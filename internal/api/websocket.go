@@ -70,7 +70,7 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	rsd, found := s.rsdMap[udid]
+	device, found := s.tm.GetDevice(udid)
 	if !found {
 		response := WebSocketTunnelInfo{
 			Status: "No such device",
@@ -82,7 +82,7 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 
 	reqCh := make(chan CreateTunnelResponse, 1)
 	go func() {
-		t, err := s.createTunnel(ctx, rsd)
+		t, err := s.tm.CreateTunnel(ctx, udid)
 		reqCh <- CreateTunnelResponse{tunnel: t, error: err}
 	}()
 
@@ -94,25 +94,25 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 		}
 	}()
 
-	var tunnel *tunnel.Tunnel
+	var tun *tunnel.Tunnel
 	select {
 	case <-ctx.Done():
 		// WebSocket connection terminated before the tunnel was created
-		s.removeTunnel(rsd)
+		s.tm.RemoveTunnel(udid)
 		return
 	case result := <-reqCh:
 		if result.error != nil {
 			http.Error(w, fmt.Sprintf("Failed to create tunnel: %v", result.error), http.StatusInternalServerError)
 			return
 		}
-		tunnel = result.tunnel
+		tun = result.tunnel
 	}
 
 	response := WebSocketTunnelInfo{
 		Status:   "Success",
-		Address:  tunnel.Address,
-		RsdPort:  tunnel.RsdPort,
-		Services: tunnel.Services,
+		Address:  tun.Address,
+		RsdPort:  tun.RsdPort,
+		Services: tun.Services,
 	}
 	b, _ := json.Marshal(response)
 	_ = c.Write(ctx, websocket.MessageText, b)
@@ -131,14 +131,17 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 	for {
 		select {
 		case <-ctx.Done():
-			s.removeTunnel(rsd)
+			s.tm.RemoveTunnel(udid)
 			return
-		case <-tunnel.TunnelContext.Done():
-			s.removeTunnel(rsd)
+		case <-device.Context().Done():
+			s.tm.RemoveTunnel(udid)
+			return
+		case <-tun.TunnelContext.Done():
+			s.tm.RemoveTunnel(udid)
 			return
 		case err := <-errCh:
 			if err != nil {
-				s.removeTunnel(rsd)
+				s.tm.RemoveTunnel(udid)
 			}
 			return
 		}

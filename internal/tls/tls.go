@@ -15,6 +15,7 @@ import (
 	"io/ioutil"
 	"net"
 	"strings"
+	"time"
 )
 
 // Server returns a new TLS server side connection
@@ -77,6 +78,11 @@ func Listen(network, laddr string, config *Config) (net.Listener, error) {
 	return NewListener(l, config), nil
 }
 
+const (
+	dialTimeout      = 3 * time.Second
+	handshakeTimeout = 3 * time.Second
+)
+
 // Dial connects to the given network address using net.Dial
 // and then initiates a TLS handshake, returning the resulting
 // TLS connection.
@@ -85,7 +91,10 @@ func Listen(network, laddr string, config *Config) (net.Listener, error) {
 // for the defaults.
 func Dial(network, addr string, config *Config) (*Conn, error) {
 	raddr := addr
-	c, err := net.Dial(network, raddr)
+	dialer := net.Dialer{
+		Timeout: dialTimeout,
+	}
+	c, err := dialer.Dial(network, raddr)
 	if err != nil {
 		return nil, err
 	}
@@ -103,12 +112,22 @@ func Dial(network, addr string, config *Config) (*Conn, error) {
 	// from the hostname we're connecting to.
 	if config.ServerName == "" {
 		// Make a copy to avoid polluting argument or default.
-		c := *config
-		c.ServerName = hostname
-		config = &c
+		config = config.Clone()
+		config.ServerName = hostname
 	}
 	conn := Client(c, config)
+
+	// Set deadline for handshake
+	if err = c.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+		c.Close()
+		return nil, err
+	}
 	if err = conn.Handshake(); err != nil {
+		c.Close()
+		return nil, err
+	}
+	// Clear deadline after successful handshake
+	if err = c.SetDeadline(time.Time{}); err != nil {
 		c.Close()
 		return nil, err
 	}
