@@ -93,8 +93,8 @@ func (d *TunnelDevice) CreateTunnel(ctx context.Context) (*tunnel.Tunnel, error)
 	return d.createTunnelInternal(ctx)
 }
 
-// RemoveTunnel closes an existing tunnel
-func (d *TunnelDevice) RemoveTunnel() {
+// RemoveTunnel closes an existing tunnel and returns true if a tunnel was removed
+func (d *TunnelDevice) RemoveTunnel() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -103,7 +103,9 @@ func (d *TunnelDevice) RemoveTunnel() {
 		d.tun.Close()
 		d.tun = nil
 		d.status = tunnel.Disconnected
+		return true
 	}
+	return false
 }
 
 // GetTunnel returns the current tunnel if one exists

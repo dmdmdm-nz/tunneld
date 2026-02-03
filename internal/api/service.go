@@ -15,11 +15,25 @@ import (
 	"github.com/dmdmdm-nz/tunneld/internal/tunnelmgr"
 )
 
+// TunnelManager defines the interface for tunnel management operations
+type TunnelManager interface {
+	GetTunnel(udid string) (*tunnel.Tunnel, bool)
+	RemoveTunnel(udid string) bool
+	GetAllTunnels() []*tunnel.Tunnel
+	IsAutoCreateEnabled() bool
+	DeviceExists(udid string) bool
+	IsDeviceReady(udid string) bool
+	IsDevicePaired(udid string) bool
+	GetAllDevices() []*tunnelmgr.TunnelDevice
+	GetDevice(udid string) (*tunnelmgr.TunnelDevice, bool)
+	CreateTunnel(ctx context.Context, udid string) (*tunnel.Tunnel, error)
+}
+
 // Service represents the HTTP server for the API
 type Service struct {
 	address string
 	port    int
-	tm      *tunnelmgr.Manager
+	tm      TunnelManager
 }
 
 func NewService(host string, port int) *Service {
@@ -29,7 +43,7 @@ func NewService(host string, port int) *Service {
 	}
 }
 
-func (s *Service) AttachTunnelMgr(tm *tunnelmgr.Manager) {
+func (s *Service) AttachTunnelMgr(tm TunnelManager) {
 	s.tm = tm
 }
 
@@ -103,7 +117,10 @@ func (s *Service) startApiService(ctx context.Context) error {
 				return
 			}
 		case http.MethodDelete:
-			s.tm.RemoveTunnel(udid)
+			if !s.tm.RemoveTunnel(udid) {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			return
 		default:

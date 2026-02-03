@@ -236,15 +236,16 @@ func (m *Manager) CreateTunnel(ctx context.Context, udid string) (*tunnel.Tunnel
 	return device.CreateTunnel(ctx)
 }
 
-// RemoveTunnel removes a tunnel for a device
-func (m *Manager) RemoveTunnel(udid string) {
+// RemoveTunnel removes a tunnel for a device and returns true if a tunnel was removed
+func (m *Manager) RemoveTunnel(udid string) bool {
 	m.devicesMu.RLock()
 	device, ok := m.devices[udid]
 	m.devicesMu.RUnlock()
 
 	if ok {
-		device.RemoveTunnel()
+		return device.RemoveTunnel()
 	}
+	return false
 }
 
 // DeviceExists checks if a device exists
