@@ -102,7 +102,11 @@ func CreateWebSocketTunnel(s *Service, udid string, w http.ResponseWriter, r *ht
 		return
 	case result := <-reqCh:
 		if result.error != nil {
-			http.Error(w, fmt.Sprintf("Failed to create tunnel: %v", result.error), http.StatusInternalServerError)
+			response := WebSocketTunnelInfo{
+				Status: fmt.Sprintf("Failed to create tunnel: %v", result.error),
+			}
+			b, _ := json.Marshal(response)
+			_ = c.Write(ctx, websocket.MessageText, b)
 			return
 		}
 		tun = result.tunnel
