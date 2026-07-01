@@ -35,6 +35,19 @@ func accept(w http.ResponseWriter, r *http.Request) (*websocket.Conn, context.Co
 }
 
 func PauseRemoteD(s *Service, w http.ResponseWriter, r *http.Request) {
+	// Suspend remoted *before* completing the WebSocket upgrade. SuspendRemoted blocks
+	// until remoted is confirmed stopped, so once we accept the socket the client's
+	// completed upgrade (HTTP 101) is a valid "remoted is suspended" barrier. The
+	// previous order — upgrade first, then suspend — let a client proceed while remoted
+	// was still running and racing it.
+	resumeRemoted, err := tunnel.SuspendRemoted()
+	if err != nil {
+		log.Errorf("Failed to pause RemoteD: %v", err)
+		http.Error(w, "failed to suspend remoted", http.StatusInternalServerError)
+		return
+	}
+	defer resumeRemoted()
+
 	c, ctx, err := accept(w, r)
 	if err != nil {
 		log.Error("Failed to accept client:", err)
@@ -42,13 +55,12 @@ func PauseRemoteD(s *Service, w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.Close(websocket.StatusNormalClosure, "closing")
 
-	resumeRemoted, err := tunnel.SuspendRemoted()
-	if err != nil {
-		log.Errorf("Failed to pause RemoteD: %v", err)
+	// remoted is already confirmed suspended; announce readiness explicitly so a client
+	// can wait on an application-level message instead of relying on the transport-level
+	// upgrade (and so the invariant is documented against future refactors).
+	if err := c.Write(ctx, websocket.MessageText, []byte(`{"status":"suspended"}`)); err != nil {
 		return
 	}
-
-	defer resumeRemoted()
 
 	for {
 		_, _, err := c.Read(ctx)
