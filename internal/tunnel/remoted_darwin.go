@@ -125,6 +125,17 @@ func (r *remotedService) suspend() (func(), error) {
 	// Perform the actual suspend action without holding the mutex
 	log.Trace("Executing suspend command")
 	err := signalRemotedSuspend()
+	if err == nil {
+		// killall -STOP only guarantees the signal was *sent*, not that remoted has
+		// actually parked. Callers use a successful suspend as a barrier (e.g. before
+		// an RSD / RemotePairing handshake that contends with remoted), so wait until
+		// remoted is observed in the stopped state. On timeout, roll the SIGSTOP back
+		// so we don't leak a suspension that no resume function is tracking.
+		if werr := waitRemotedStopped(remotedStopTimeout); werr != nil {
+			_ = signalRemotedResume()
+			err = werr
+		}
+	}
 
 	r.mu.Lock()
 	r.suspending = false
@@ -263,6 +274,35 @@ func isRemotedStopped() bool {
 	state := strings.TrimSpace(string(out))
 	// State 'T' means stopped (SIGSTOP), 'T+' means stopped in foreground
 	return strings.HasPrefix(state, "T")
+}
+
+// remotedStopTimeout bounds how long suspend() waits for remoted to actually enter
+// the stopped state after SIGSTOP is sent before giving up.
+const remotedStopTimeout = 2 * time.Second
+
+// Overridable in tests.
+var (
+	remotedStopPollInterval = 10 * time.Millisecond
+	// remotedIsStopped reports whether remoted is safe to treat as suspended: either
+	// it is no longer running, or it has entered the stopped ('T') state.
+	remotedIsStopped = func() bool { return getRemotedPID() == 0 || isRemotedStopped() }
+)
+
+// waitRemotedStopped blocks until remoted is observed stopped (or gone), or the
+// timeout elapses. killall -STOP returns once the signal is dispatched, not once the
+// target has parked, so callers that treat suspension as a barrier must confirm the
+// state transition here rather than trusting the send.
+func waitRemotedStopped(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if remotedIsStopped() {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("remoted did not reach stopped state within %s", timeout)
+		}
+		time.Sleep(remotedStopPollInterval)
+	}
 }
 
 // shouldSuspend returns true if remoted should be kept suspended based on current suspend count.
